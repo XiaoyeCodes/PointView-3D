@@ -1,0 +1,20 @@
+{
+  "name": "pointview-3d",
+  "version": "1.0.0",
+  "description": "三维模型预览、坐标标注、测点导入与视图检查工具",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XiaoyeCodes/PointView-3D.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.0.0"
+  }
+}

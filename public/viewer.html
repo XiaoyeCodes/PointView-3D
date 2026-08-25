@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>3D 模型预览</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #f4f5f7; height: 100%; }
+  #info {
+    position: absolute; top: 14px; left: 16px; color: #2a2e35;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px; line-height: 1.6; pointer-events: none; opacity: 0.92;
+    max-width: 60vw;
+  }
+  #info b { font-size: 15px; word-break: break-all; }
+  #back {
+    position: absolute; top: 14px; right: 16px;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px; color: #2a2e35; text-decoration: none;
+    border: 1px solid #c7cbd1; padding: 6px 12px; border-radius: 4px;
+    background: rgba(255, 255, 255, 0.7);
+    opacity: 0.9;
+  }
+  #back:hover { opacity: 1; border-color: #9098a3; }
+  #loading, #error {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #2a2e35; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; text-align: center;
+  }
+  #error { color: #d64545; display: none; max-width: 80vw; white-space: pre-wrap; }
+  canvas { display: block; }
+
+  #toolbar {
+    position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid #d7dae0; border-radius: 8px;
+    padding: 8px; backdrop-filter: blur(4px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+  }
+  .tool-btn {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 12.5px; color: #2a2e35;
+    background: #eef0f3; border: 1px solid #d7dae0; border-radius: 6px;
+    padding: 8px 14px; cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap: 6px;
+    transition: background .15s, border-color .15s;
+  }
+  .tool-btn:hover { background: #e3e6ea; }
+  .tool-btn.active { background: #ff8a3d; border-color: #ff8a3d; color: #1a0e04; font-weight: 600; }
+  .tool-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa1ab; }
+  .tool-btn.active .dot { background: #1a0e04; }
+  .layout-control {
+    display: flex; align-items: center; gap: 7px; white-space: nowrap;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 12.5px; color: #2a2e35;
+    background: #eef0f3; border: 1px solid #d7dae0; border-radius: 6px;
+    padding: 5px 7px 5px 11px;
+  }
+  #annotation-layout-mode {
+    font: inherit; color: #2a2e35; cursor: pointer;
+    background: #fff; border: 1px solid #c8cdd4; border-radius: 5px;
+    padding: 3px 24px 3px 7px; outline: none;
+  }
+  #annotation-layout-mode:focus { border-color: #ff8a3d; }
+
+  #view-shortcuts {
+    position: absolute; top: 64px; right: 16px; z-index: 6;
+    width: 212px; padding: 9px;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: rgba(255, 255, 255, 0.86); border: 1px solid #d7dae0;
+    border-radius: 8px; backdrop-filter: blur(5px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+  }
+  #view-shortcuts .view-title {
+    margin: 0 0 7px 2px; color: #6b7280; font-size: 11.5px;
+  }
+  #view-shortcuts .view-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+  }
+  .view-btn {
+    height: 38px; padding: 0; cursor: pointer; user-select: none;
+    color: #2a2e35; font-size: 12px; line-height: 1;
+    background: #eef0f3; border: 1px solid #d7dae0; border-radius: 6px;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .view-btn:hover { background: #e3e6ea; border-color: #aeb5bf; }
+  .view-btn.active { background: #ff8a3d; border-color: #ff8a3d; color: #1a0e04; font-weight: 600; }
+  .view-btn .view-symbol { display: block; margin-bottom: 3px; font-size: 14px; color: #4f8fb8; }
+  .view-btn.active .view-symbol { color: #1a0e04; }
+
+  #coord-tip {
+    position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 12px; color: #b34700;
+    background: rgba(255, 255, 255, 0.85); border: 1px solid #d7dae0; border-radius: 6px;
+    padding: 6px 12px; display: none; white-space: nowrap;
+  }
+
+  #leader-svg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #annotation-layer {
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+  }
+  .coord-label {
+    position: absolute;
+    font-family: monospace;
+    font-size: 13px; line-height: 1.5; font-weight: 600;
+    color: #1a1d23;
+    background: rgba(255, 255, 255, 0.62);
+    -webkit-backdrop-filter: blur(7px) saturate(1.3);
+    backdrop-filter: blur(7px) saturate(1.3);
+    border: 1.5px solid #ff8a3d; border-radius: 6px;
+    padding: 6px 10px;
+    white-space: pre;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+  }
+
+  .coord-label .p-label {
+    color: #b34700;
+  }
+
+  #import-modal {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(20, 22, 26, 0.45); z-index: 10;
+  }
+  #import-panel {
+    width: min(560px, 88vw);
+    background: #ffffff; border: 1px solid #d7dae0; border-radius: 10px;
+    padding: 18px 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  #import-panel h3 { margin: 0 0 8px; font-size: 15px; color: #1a1d23; }
+  #import-panel p { margin: 0 0 12px; font-size: 12px; color: #6b7280; line-height: 1.6; }
+  #import-panel textarea {
+    width: 100%; height: 180px; box-sizing: border-box;
+    background: #f7f8fa; color: #1a1d23; border: 1px solid #d7dae0; border-radius: 6px;
+    font-family: monospace; font-size: 12px; padding: 10px; resize: vertical;
+  }
+  #import-panel .row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 10px; }
+  #import-panel .row-left { display: flex; gap: 8px; align-items: center; }
+  #import-file-label {
+    font-size: 12px; color: #1a1d23; background: #eef0f3; border: 1px solid #d7dae0;
+    border-radius: 6px; padding: 7px 12px; cursor: pointer;
+  }
+  #import-status { font-size: 12px; color: #6b7280; }
+  #import-actions { display: flex; gap: 8px; }
+  #import-actions button {
+    font-family: inherit; font-size: 12.5px; border-radius: 6px; padding: 8px 16px;
+    cursor: pointer; border: 1px solid #d7dae0;
+  }
+  #btn-import-cancel { background: #eef0f3; color: #1a1d23; }
+  #btn-import-confirm { background: #ff8a3d; color: #1a0e04; border-color: #ff8a3d; font-weight: 600; }
+
+  #gizmo-frame {
+    position: absolute; right: 16px; bottom: 16px;
+    width: 192px; height: 192px;
+    border: 1px solid #d7dae0; border-radius: 10px;
+    overflow: hidden; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="info"></div>
+<a id="back" href="/">← 重新上传</a>
+<div id="loading">正在加载模型…</div>
+<div id="error"></div>
+<div id="coord-tip">点击模型表面添加坐标标注</div>
+<svg id="leader-svg"></svg>
+<div id="annotation-layer"></div>
+<div id="toolbar">
+  <div class="tool-btn active" id="btn-grid"><span class="dot"></span>网格</div>
+  <div class="tool-btn" id="btn-annotate"><span class="dot"></span>坐标标注</div>
+  <label class="layout-control" title="切换坐标标签的排列方式">
+    标注布局
+    <select id="annotation-layout-mode">
+      <option value="near">就近布局</option>
+      <option value="balanced" selected>均匀避让</option>
+    </select>
+  </label>
+  <div class="tool-btn" id="btn-import"><span class="dot"></span>导入坐标数据</div>
+  <div class="tool-btn" id="btn-clear-annotate"><span class="dot"></span>清除标注</div>
+</div>
+
+<div id="gizmo-frame"></div>
+<div id="view-shortcuts" aria-label="常用视图">
+  <div class="view-title">常用视图</div>
+  <div class="view-grid">
+    <button class="view-btn" data-view="front" title="前视图"><span class="view-symbol">▣</span>前</button>
+    <button class="view-btn" data-view="back" title="后视图"><span class="view-symbol">▢</span>后</button>
+    <button class="view-btn" data-view="left" title="左视图"><span class="view-symbol">◧</span>左</button>
+    <button class="view-btn" data-view="right" title="右视图"><span class="view-symbol">◨</span>右</button>
+    <button class="view-btn" data-view="top" title="顶视图"><span class="view-symbol">⬒</span>顶</button>
+    <button class="view-btn" data-view="bottom" title="底视图"><span class="view-symbol">⬓</span>底</button>
+    <button class="view-btn active" data-view="iso" title="等轴测视图"><span class="view-symbol">◇</span>等轴</button>
+    <button class="view-btn" data-view="fit" title="保持当前方向并适配窗口"><span class="view-symbol">⛶</span>适配</button>
+  </div>
+</div>
+<div id="import-modal">
+  <div id="import-panel">
+    <h3>导入坐标数据生成标记点</h3>
+    <p>
+      每行一组数据，用逗号分隔，格式为：<code>编号,X,Y,Z,...</code>（后面还有别的列也没关系，会自动忽略）。
+      坐标默认按模型原始文件坐标系（跟点击拾取显示的坐标是同一套）处理。
+    </p>
+    <textarea id="import-textarea" placeholder="例如：&#10;1,0.0915,36.4164,-0.0002,0,0,1,...&#10;2,-0.5608,32.9408,-1.7486,...&#10;..."></textarea>
+    <div class="row">
+      <div class="row-left">
+        <label id="import-file-label" for="import-file-input">选择文件…</label>
+        <input type="file" id="import-file-input" accept=".csv,.txt" style="display:none">
+        <span id="import-status"></span>
+      </div>
+      <div id="import-actions">
+        <button id="btn-import-cancel">取消</button>
+        <button id="btn-import-confirm">生成标记点</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
+<script src="/vendor/occt-import-js.js"></script>
+<script>
+/*
+ * 两条渲染路径：
+ *
+ * 1. type=obj —— 用自己写的 OBJ/MTL 解析器（原因见下方注释），
+ *    然后用 THREE.EdgesGeometry(geometry, 角度阈值) 生成"只描出真实
+ *    棱边"的轮廓线：两个三角形如果共面（比如一个矩形面被拆成两个三角形），
+ *    它们中间那条对角线的夹角接近 0 度，会被阈值过滤掉，不会显示成一条
+ *    多余的线；只有真正的棱边（比如立方体的边，夹角接近 90 度）才会被画出来。
+ *
+ * 2. type=step —— 用 occt-import-js（OpenCascade 编译成的 WASM）在浏览器
+ *    里直接解析原生 STEP/STP 文件。STEP 是真正的 B-rep 精确几何（不是三角面
+ *    拼出来的），所以精度是所有格式里最高的。这里解析后会拿到每个"真实曲面
+ *    (brep face)"对应的三角形范围，据此：
+ *      a) 给每个曲面单独上色（如果 STEP 里带了颜色）
+ *      b) 只画每个曲面自己的边界，不会把曲面内部的三角化线条画出来
+ *    效果上就是标准 CAD 软件里看到的那种清晰边线。
+ */
+
+const params = new URLSearchParams(window.location.search);
+const modelType = params.get('type') || 'obj';
+const modelUrl = params.get('model');
+const mtlUrl = params.get('mtl');
+const modelName = params.get('name') || (modelUrl ? modelUrl.split('/').pop() : '');
+
+const infoEl = document.getElementById('info');
+const loadingEl = document.getElementById('loading');
+const errorEl = document.getElementById('error');
+
+infoEl.innerHTML = `<b>${modelName || '未命名模型'}</b><br>拖动旋转 · 滚轮缩放`;
+
+if (!modelUrl) {
+  showError('没有指定模型文件，请返回重新上传。');
+} else if (modelType === 'step') {
+  mainStep();
+} else {
+  mainObj();
+}
+
+function showError(msg) {
+  loadingEl.style.display = 'none';
+  errorEl.style.display = 'block';
+  errorEl.textContent = msg;
+}
+
+function setLoadingText(msg) {
+  loadingEl.textContent = msg;
+}
+
+// ==================================================================
+// 场景基础设施（相机 / 灯光 / 控制器 / 自适应取景），两条路径共用
+// ==================================================================
+function createSceneBasics() {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf4f5f7);
+
+  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 1e9);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  document.body.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const dir1 = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir1.position.set(3, 5, 4);
+  scene.add(dir1);
+  const dir2 = new THREE.DirectionalLight(0xffffff, 0.4);
+  dir2.position.set(-3, -2, -4);
+  scene.add(dir2);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  return { scene, camera, renderer };
+}
+
+function fitCameraAndControls(scene, camera, renderer, group) {
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  group.position.sub(center);
+
+  const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+  const fitRadius = maxDim * 1.8;
+  camera.near = maxDim / 1000;
+  camera.far = maxDim * 1000;
+  camera.updateProjectionMatrix();
+  camera.position.set(fitRadius * 0.6, fitRadius * 0.5, fitRadius * 0.8);
+
+  const grid = new THREE.GridHelper(Math.max(10, maxDim * 6), 20, 0xaab0b8, 0xd7dae0);
+  scene.add(grid);
+
+  let controls = null;
+  let autoRotate = false;
+
+  if (typeof THREE.OrbitControls === 'function') {
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.update();
+  } else {
+    autoRotate = true;
+    let isDragging = false, prevX = 0, prevY = 0;
+    let theta = 0.7, phi = 1.0, radius = fitRadius;
+    function updateCam() {
+      camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
+      camera.position.y = radius * Math.cos(phi);
+      camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
+      camera.lookAt(0, 0, 0);
+    }
+    updateCam();
+    renderer.domElement.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; autoRotate = false; });
+    window.addEventListener('mouseup', () => isDragging = false);
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      theta -= (e.clientX - prevX) * 0.005;
+      phi -= (e.clientY - prevY) * 0.005;
+      phi = Math.max(0.15, Math.min(Math.PI - 0.15, phi));
+      prevX = e.clientX; prevY = e.clientY;
+      updateCam();
+    });
+    renderer.domElement.addEventListener('wheel', e => {
+      radius = Math.max(fitRadius * 0.05, Math.min(fitRadius * 20, radius + e.deltaY * fitRadius * 0.001));
+      updateCam();
+      e.preventDefault();
+    }, { passive: false });
+    window.__updateFallbackCam = updateCam;
+    window.__fallbackState = {
+      get theta() { return theta; }, set theta(v) { theta = v; },
+      get phi() { return phi; }, set phi(v) { phi = v; },
+      get radius() { return radius; }, set radius(v) { radius = v; }
+    };
+  }
+
+  return { controls, autoRotate, grid, fitRadius };
+}
+
+// ==================================================================
+// 常用正交方向快捷视图（前/后/左/右/顶/底/等轴测/适配）
+// ==================================================================
+function setupViewShortcuts({ camera, group, controlsState }) {
+  const buttons = [...document.querySelectorAll('.view-btn')];
+  const box = new THREE.Box3().setFromObject(group);
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const target = sphere.center.clone();
+
+  function getFitDistance() {
+    const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+    const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+    const limitingFov = Math.min(verticalFov, horizontalFov);
+    return Math.max(sphere.radius / Math.sin(limitingFov / 2) * 1.12, controlsState.fitRadius * 0.55);
+  }
+
+  function applyView(direction, up, activeName) {
+    const distance = getFitDistance();
+    camera.up.copy(up);
+    camera.position.copy(target).add(direction.clone().normalize().multiplyScalar(distance));
+    camera.lookAt(target);
+    camera.updateMatrixWorld();
+
+    if (controlsState.controls) {
+      controlsState.controls.target.copy(target);
+      controlsState.controls.update();
+    } else if (window.__fallbackState && window.__updateFallbackCam) {
+      const delta = camera.position.clone().sub(target);
+      const radius = delta.length() || distance;
+      window.__fallbackState.radius = radius;
+      window.__fallbackState.phi = Math.acos(Math.max(-1, Math.min(1, delta.y / radius)));
+      window.__fallbackState.theta = Math.atan2(delta.x, delta.z);
+      controlsState.autoRotate = false;
+      window.__updateFallbackCam();
+    }
+
+    buttons.forEach(button => button.classList.toggle('active', button.dataset.view === activeName));
+  }
+
+  const views = {
+    front:  { direction: new THREE.Vector3(0, 0, 1),  up: new THREE.Vector3(0, 1, 0) },
+    back:   { direction: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
+    left:   { direction: new THREE.Vector3(-1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+    right:  { direction: new THREE.Vector3(1, 0, 0),  up: new THREE.Vector3(0, 1, 0) },
+    // 顶/底视图也始终保持 Y-up。Z 方向上的极小偏移用来避开球坐标
+    // 的正负极点，否则从顶/底视图开始拖动时旋转方向会显得突兀。
+    top:    { direction: new THREE.Vector3(0, 1, 1e-6),  up: new THREE.Vector3(0, 1, 0) },
+    bottom: { direction: new THREE.Vector3(0, -1, 1e-6), up: new THREE.Vector3(0, 1, 0) },
+    iso:    { direction: new THREE.Vector3(1, 0.8, 1), up: new THREE.Vector3(0, 1, 0) }
+  };
+
+  buttons.forEach(button => {
+    button.addEventListener('click', () => {
+      const name = button.dataset.view;
+      if (name === 'fit') {
+        const direction = camera.position.clone().sub(target);
+        applyView(direction.lengthSq() ? direction : views.iso.direction, camera.up.clone(), 'fit');
+        return;
+      }
+      const view = views[name];
+      if (view) applyView(view.direction, view.up, name);
+    });
+  });
+
+  // 用户一旦开始手动旋转/平移/缩放，就已经离开严格的预设视图，
+  // 取消高亮，避免按钮状态仍误导为“顶视图”或“底视图”。
+  if (controlsState.controls) {
+    controlsState.controls.addEventListener('start', () => {
+      buttons.forEach(button => button.classList.remove('active'));
+    });
+  }
+}
+
+function startRenderLoop(renderer, scene, camera, controlsState, onFrame, afterRender) {
+  function animate() {
+    requestAnimationFrame(animate);
+    if (controlsState.controls) {
+      controlsState.controls.update();
+    } else if (controlsState.autoRotate) {
+      window.__fallbackState.theta += 0.004;
+      window.__updateFallbackCam();
+    }
+    if (onFrame) onFrame();
+    renderer.render(scene, camera);
+    if (afterRender) afterRender();
+  }
+  animate();
+}
+
+// ==================================================================
+// 右下角坐标轴指示器（随主视角同步旋转）
+// ==================================================================
+// 思路：额外建一个只装 3 根箭头 + XYZ 字样的小场景和一个正交相机，
+// 每帧让小相机跟主相机保持同样的观察方向，同时让坐标轴继承
+// 模型坐标系的旋转。使用独立的小画布，避免主画布的像素比和 viewport
+// 状态影响右下角控件的显示。
+function setupAxisGizmo(mainCamera, coordinateObject) {
+  const sizeCss = 192;  // 显示的正方形区域边长（css 像素，放大一倍）
+
+  const gizmoScene = new THREE.Scene();
+  gizmoScene.background = new THREE.Color(0xeef0f3);
+  const gizmoCamera = new THREE.OrthographicCamera(-1.7, 1.7, 1.7, -1.7, 0.1, 10);
+  const gizmoRenderer = new THREE.WebGLRenderer({ antialias: true });
+  gizmoRenderer.setPixelRatio(window.devicePixelRatio);
+  gizmoRenderer.setSize(sizeCss, sizeCss, false);
+  gizmoRenderer.domElement.style.cssText = 'display:block;width:100%;height:100%';
+  document.getElementById('gizmo-frame').appendChild(gizmoRenderer.domElement);
+
+  function makeAxis(dir, colorHex, label) {
+    const group = new THREE.Group();
+    const arrow = new THREE.ArrowHelper(dir.clone().normalize(), new THREE.Vector3(0, 0, 0), 1, colorHex, 0.3, 0.16);
+    arrow.line.material.linewidth = 2;
+    group.add(arrow);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(32, 32, 27, 0, Math.PI * 2);
+    ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0');
+    ctx.fill();
+    ctx.fillStyle = '#14161a';
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 33, 35);
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: true }));
+    sprite.scale.set(0.5, 0.5, 1);
+    sprite.position.copy(dir.clone().normalize().multiplyScalar(1.32));
+    sprite.renderOrder = 999;
+    group.add(sprite);
+    return group;
+  }
+
+  // 把三根轴放进同一个根节点，每帧同步模型坐标系的世界旋转。
+  // STEP 模型会从 Z-up 转成 Three.js 的 Y-up，中间原点坐标轴会
+  // 继承这次旋转；右下角也必须继承它，两处的屏幕指向才会一致。
+  const axesRoot = new THREE.Group();
+  axesRoot.add(makeAxis(new THREE.Vector3(1, 0, 0), 0xe74c3c, 'X'));
+  axesRoot.add(makeAxis(new THREE.Vector3(0, 1, 0), 0x2ecc71, 'Y'));
+  axesRoot.add(makeAxis(new THREE.Vector3(0, 0, 1), 0x3498db, 'Z'));
+  gizmoScene.add(axesRoot);
+  gizmoScene.add(new THREE.AmbientLight(0xffffff, 1.2));
+
+  const coordinateRotation = new THREE.Quaternion();
+
+  return function renderGizmo() {
+    coordinateObject.updateWorldMatrix(true, false);
+    coordinateObject.getWorldQuaternion(coordinateRotation);
+    axesRoot.quaternion.copy(coordinateRotation);
+
+    // 只跟随主相机的朝向（不跟随缩放/平移），固定放在原点附近观察
+    gizmoCamera.position.copy(mainCamera.position).normalize().multiplyScalar(3);
+    gizmoCamera.up.copy(mainCamera.up);
+    gizmoCamera.lookAt(0, 0, 0);
+    gizmoCamera.updateMatrixWorld();
+    gizmoRenderer.render(gizmoScene, gizmoCamera);
+  };
+}
+
+// ==================================================================
+// 在模型原点位置放一个小坐标轴标志（作为 group 的子对象）
+// ==================================================================
+// 跟右下角那个"随视角旋转但固定大小"的指示器不同，这个是真正"长"在
+// 模型自己的坐标原点 (0,0,0) 上的，会跟着模型一起被居中/旋转变换，
+// 所以看到的箭头方向就是模型原始文件坐标系里 X/Y/Z 轴实际指向的方向，
+// 可以直接用来肉眼核对"点击拾取"出来的坐标对不对——比如原点在模型的
+// 哪个角落、往哪个方向是 X 正方向，一眼就能对上。
+function addOriginMarker(group) {
+  const box = new THREE.Box3().setFromObject(group);
+  const diag = box.getSize(new THREE.Vector3()).length();
+  const len = Math.max(diag * 0.09, 1e-4);
+
+  const marker = new THREE.Group();
+  marker.renderOrder = 997;
+
+  function makeAxis(dir, colorHex) {
+    const arrow = new THREE.ArrowHelper(dir.clone().normalize(), new THREE.Vector3(0, 0, 0), len, colorHex, len * 0.28, len * 0.16);
+    arrow.line.material.depthTest = false;
+    arrow.cone.material.depthTest = false;
+    marker.add(arrow);
+  }
+
+  makeAxis(new THREE.Vector3(1, 0, 0), 0xe74c3c);
+  makeAxis(new THREE.Vector3(0, 1, 0), 0x2ecc71);
+  makeAxis(new THREE.Vector3(0, 0, 1), 0x3498db);
+
+  group.add(marker);
+  return marker;
+}
+
+// ==================================================================
+// 工具栏：网格显示/隐藏 + 点击拾取坐标标注
+// ==================================================================
+//
+// 关于坐标标注功能的说明：
+// 用户提供的参考图（NX 里的 P001~P009 公差标注）是 CMM 测量报告 /
+// 人工在 NX 里做的 GD&T 标注，这类语义化 PMI 数据只有 STEP AP242 才
+// 会保存成 GEOMETRIC_TOLERANCE / DATUM 之类的实体。用脚本扫描过
+// 123214.stp 的实体类型，它的 schema 是 AUTOMOTIVE_DESIGN（AP214），
+// 文件里只有 CARTESIAN_POINT / VERTEX_POINT 这类几何点，没有任何标注
+// /公差相关实体——也就是说这份文件本身并不包含图里那套标注数据，没法
+// 直接"读取还原"。所以这里做的是它的一个实际可用替代方案：点击模型
+// 表面，实时算出该点在原始 STEP/OBJ 坐标系下的精确 XYZ 坐标并标注出来，
+// 效果上也是"在模型上展示坐标"，只是数值来自你点的位置，而不是文件里
+// 预置的公差数据。
+function setupToolbar({ scene, camera, renderer, group, grid }) {
+  const btnGrid = document.getElementById('btn-grid');
+  const btnAnnotate = document.getElementById('btn-annotate');
+  const btnClear = document.getElementById('btn-clear-annotate');
+  const coordTip = document.getElementById('coord-tip');
+
+  // ---- 网格显示/隐藏 ----
+  btnGrid.addEventListener('click', () => {
+    grid.visible = !grid.visible;
+    btnGrid.classList.toggle('active', grid.visible);
+  });
+
+  // ---- 导入坐标数据 ----
+  const importModal = document.getElementById('import-modal');
+  const importTextarea = document.getElementById('import-textarea');
+  const importFileInput = document.getElementById('import-file-input');
+  const importStatus = document.getElementById('import-status');
+  const btnImport = document.getElementById('btn-import');
+  const btnImportCancel = document.getElementById('btn-import-cancel');
+  const btnImportConfirm = document.getElementById('btn-import-confirm');
+
+  btnImport.addEventListener('click', () => {
+    importModal.style.display = 'flex';
+    importStatus.textContent = '';
+  });
+  btnImportCancel.addEventListener('click', () => {
+    importModal.style.display = 'none';
+  });
+  importModal.addEventListener('click', e => {
+    if (e.target === importModal) importModal.style.display = 'none';
+  });
+
+  importFileInput.addEventListener('change', () => {
+    const file = importFileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { importTextarea.value = reader.result; };
+    reader.readAsText(file);
+  });
+
+  // 解析格式：编号,X,Y,Z,... （逗号分隔，每行一组，后面的列全部忽略）
+  function parseCoordData(text) {
+    const points = [];
+    let skipped = 0;
+    text.split(/\r?\n/).forEach(rawLine => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith('//')) return;
+      const parts = line.split(',').map(s => s.trim());
+      if (parts.length < 4) { skipped++; return; }
+      const x = parseFloat(parts[1]);
+      const y = parseFloat(parts[2]);
+      const z = parseFloat(parts[3]);
+      if ([x, y, z].some(v => Number.isNaN(v))) { skipped++; return; }
+      points.push({ label: 'P' + parts[0], x, y, z });
+    });
+    return { points, skipped };
+  }
+
+  btnImportConfirm.addEventListener('click', () => {
+    const { points, skipped } = parseCoordData(importTextarea.value);
+    if (points.length === 0) {
+      importStatus.textContent = '没有解析出有效的坐标数据，请检查格式。';
+      importStatus.style.color = '#ff6b6b';
+      return;
+    }
+    points.forEach(p => addAnnotationAtLocal(new THREE.Vector3(p.x, p.y, p.z), p.label));
+    importModal.style.display = 'none';
+    importStatus.textContent = '';
+  });
+
+
+  let annotateMode = false;
+  const markerGroup = new THREE.Group();
+  scene.add(markerGroup);
+  const annotationLayer = document.getElementById('annotation-layer');
+  const leaderSvg = document.getElementById('leader-svg');
+  const layoutModeSelect = document.getElementById('annotation-layout-mode');
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const annotationList = []; // { worldPoint, dot(3D mesh), labelEl, lineEl }
+
+  const LABEL_OFFSET_DIST = 90; // 标签相对标记点的屏幕像素偏移距离
+  // 模型本身不会移动，缓存世界坐标包围盒；相机旋转/缩放时只需重新投影
+  // 8 个角点，避免每帧遍历整个 STEP/OBJ 网格。
+  const modelWorldBox = new THREE.Box3().setFromObject(group);
+  const modelBoxCorners = [];
+  for (const x of [modelWorldBox.min.x, modelWorldBox.max.x]) {
+    for (const y of [modelWorldBox.min.y, modelWorldBox.max.y]) {
+      for (const z of [modelWorldBox.min.z, modelWorldBox.max.z]) {
+        modelBoxCorners.push(new THREE.Vector3(x, y, z));
+      }
+    }
+  }
+
+  function addAnnotation(worldPoint, label) {
+    // 转换回模型自身的局部坐标系（也就是原始 STEP/OBJ 文件里的坐标），
+    // 而不是显示用的、经过居中/旋转调整过的场景坐标。
+    const localPoint = group.worldToLocal(worldPoint.clone());
+
+    const dotGeo = new THREE.SphereGeometry(1, 12, 12);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xff8a3d, depthTest: false });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.position.copy(worldPoint);
+    dot.renderOrder = 998;
+    const box = new THREE.Box3().setFromObject(group);
+    const diag = box.getSize(new THREE.Vector3()).length();
+    dot.scale.setScalar(Math.max(diag * 0.004, 1e-4));
+    markerGroup.add(dot);
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'coord-label';
+    const coordText = `X: ${localPoint.x.toFixed(3)}\nY: ${localPoint.y.toFixed(3)}\nZ: ${localPoint.z.toFixed(3)}`;
+    if (label) {
+      const prefixSpan = document.createElement('span');
+      prefixSpan.className = 'p-label';
+      prefixSpan.textContent = label;
+      labelEl.appendChild(prefixSpan);
+      labelEl.appendChild(document.createTextNode('\n' + coordText));
+    } else {
+      labelEl.textContent = coordText;
+    }
+    annotationLayer.appendChild(labelEl);
+
+    const lineEl = document.createElementNS(svgNS, 'line');
+    lineEl.setAttribute('stroke', '#ff8a3d');
+    lineEl.setAttribute('stroke-width', '1.5');
+    lineEl.setAttribute('stroke-opacity', '0.8');
+    leaderSvg.appendChild(lineEl);
+
+    annotationList.push({ worldPoint: worldPoint.clone(), dot, labelEl, lineEl, fanIndex: annotationList.length });
+  }
+
+  // 导入坐标数据（局部/文件坐标系）时用这个：先转换成世界坐标再复用同一套
+  // 标记点/引线逻辑
+  function addAnnotationAtLocal(localPoint, label) {
+    const worldPoint = group.localToWorld(localPoint.clone());
+    addAnnotation(worldPoint, label);
+  }
+
+  function clearAnnotations() {
+    annotationList.forEach(a => {
+      markerGroup.remove(a.dot);
+      a.dot.geometry.dispose();
+      a.dot.material.dispose();
+      a.labelEl.remove();
+      a.lineEl.remove();
+    });
+    annotationList.length = 0;
+  }
+
+  // 每帧把 3D 坐标投影到屏幕像素坐标，标签沿"画布中心 -> 标记点"的方向
+  // 再往外偏移一段固定像素距离——这样标签会自然地被推向画面空白处，
+  // 而不是像之前那样固定在模型局部坐标的某个方向，容易被模型自身挡住。
+  function updateAnnotations() {
+    if (annotationList.length === 0) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    const cx = w / 2, cy = h / 2;
+    const tmp = new THREE.Vector3();
+    const balancedLayout = layoutModeSelect.value === 'balanced';
+
+    // 第一遍：算出每个标注点在屏幕上的像素坐标
+    const visible = [];
+    annotationList.forEach(a => {
+      tmp.copy(a.worldPoint).project(camera);
+      const behind = tmp.z > 1;
+      if (behind) {
+        a.labelEl.style.display = 'none';
+        a.lineEl.style.display = 'none';
+        return;
+      }
+      a.labelEl.style.display = 'block';
+      a.lineEl.style.display = 'block';
+      visible.push({ a, sx: (tmp.x * 0.5 + 0.5) * w, sy: (-tmp.y * 0.5 + 0.5) * h });
+    });
+
+    // 把模型世界包围盒投影成屏幕矩形。标签布局会把这个矩形视为禁入区，
+    // 因而在视角变化时仍会尽量待在实体外侧。
+    const modelRect = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+    modelBoxCorners.forEach(corner => {
+      tmp.copy(corner).project(camera);
+      const px = (tmp.x * 0.5 + 0.5) * w;
+      const py = (-tmp.y * 0.5 + 0.5) * h;
+      modelRect.left = Math.min(modelRect.left, px);
+      modelRect.top = Math.min(modelRect.top, py);
+      modelRect.right = Math.max(modelRect.right, px);
+      modelRect.bottom = Math.max(modelRect.bottom, py);
+    });
+
+    // 第二遍：把屏幕上靠得很近的点分成一组（比如导入的一批 CMM 测量点
+    // 经常物理位置就挨得很近），同一组内的标签先按圆周均匀分布展开，
+    // 半径随组内点数增加而增大，保证有足够空间。
+    const CLUSTER_RADIUS = 55;
+    const clusters = [];
+    visible.forEach(v => {
+      let cluster = clusters.find(c => Math.hypot(c.cx - v.sx, c.cy - v.sy) < CLUSTER_RADIUS);
+      if (!cluster) {
+        cluster = { cx: v.sx, cy: v.sy, members: [] };
+        clusters.push(cluster);
+      }
+      cluster.members.push(v);
+      cluster.cx = cluster.members.reduce((s, m) => s + m.sx, 0) / cluster.members.length;
+      cluster.cy = cluster.members.reduce((s, m) => s + m.sy, 0) / cluster.members.length;
+    });
+
+    const placed = []; // { v, lx, ly, hw, hh } 供后面碰撞检测统一处理
+
+    clusters.forEach(cluster => {
+      const n = cluster.members.length;
+
+      let bdx = cluster.cx - cx, bdy = cluster.cy - cy;
+      const blen = Math.hypot(bdx, bdy) || 1;
+      bdx /= blen; bdy /= blen;
+      bdy -= 0.25;
+      const bl = Math.hypot(bdx, bdy) || 1;
+      const baseAngle = Math.atan2(bdy / bl, bdx / bl);
+
+      // 就近布局控制线长；均匀避让会随密度明显外扩，为标签留出空间。
+      const radius = LABEL_OFFSET_DIST + Math.max(0, n - 1) * (balancedLayout ? 32 : 14);
+
+      // 标签槽位和标记点必须保持相同的环向顺序。之前直接使用导入顺序，
+      // 当导入顺序与点在屏幕上的顺序不一致时，引导线会天然互相交叉。
+      const orderedMembers = [...cluster.members].sort((a, b) => {
+        const angleA = Math.atan2(a.sy - cluster.cy, a.sx - cluster.cx);
+        const angleB = Math.atan2(b.sy - cluster.cy, b.sx - cluster.cx);
+        const relA = (angleA - baseAngle + Math.PI * 2) % (Math.PI * 2);
+        const relB = (angleB - baseAngle + Math.PI * 2) % (Math.PI * 2);
+        return relA - relB;
+      });
+
+      orderedMembers.forEach((v, i) => {
+        const angle = n > 1 ? baseAngle + (i / n) * Math.PI * 2 : baseAngle;
+        let lx = v.sx + Math.cos(angle) * radius;
+        let ly = v.sy + Math.sin(angle) * radius;
+        // 标签实际像素尺寸（用于碰撞检测），拿不到就用一个保守估计
+        const w2 = v.a.labelEl.offsetWidth || 110;
+        const h2 = v.a.labelEl.offsetHeight || 68;
+        placed.push({ v, lx, ly, hw: w2 / 2 + 6, hh: h2 / 2 + 6 });
+      });
+    });
+
+    // 碰撞松弛：对所有（跨聚类也算在内）两两检测标签矩形是否重叠，
+    // 重叠就沿两者中心连线方向各自推开一半，迭代几轮让结果收敛；
+    // 每轮都顺带把越界的标签夹回画布内，避免最后统一夹一次又重新叠上。
+    const margin = 70;
+    const marginTop = 130; // 顶部留多一点，避开左上角的文字信息
+    function clampPlaced(p) {
+      p.lx = Math.max(Math.max(margin, p.hw + 8), Math.min(w - Math.max(margin, p.hw + 8), p.lx));
+      p.ly = Math.max(Math.max(marginTop, p.hh + 8), Math.min(h - Math.max(margin, p.hh + 8), p.ly));
+    }
+
+    // 标记越多，标签与实体之间保留的空隙越大，引导线也会自然拉长。
+    const modelClearance = 18 + Math.min(110, Math.max(0, visible.length - 4) * 7);
+
+    function pushOutsideModel(p) {
+      if (!balancedLayout) return;
+      const overlapsModel =
+        p.lx + p.hw > modelRect.left && p.lx - p.hw < modelRect.right &&
+        p.ly + p.hh > modelRect.top && p.ly - p.hh < modelRect.bottom;
+      if (!overlapsModel) return;
+
+      const minX = Math.max(margin, p.hw + 8);
+      const maxX = w - Math.max(margin, p.hw + 8);
+      const minY = Math.max(marginTop, p.hh + 8);
+      const maxY = h - Math.max(margin, p.hh + 8);
+      const clampX = x => Math.max(minX, Math.min(maxX, x));
+      const clampY = y => Math.max(minY, Math.min(maxY, y));
+      const candidates = [];
+
+      const leftX = modelRect.left - modelClearance - p.hw;
+      const rightX = modelRect.right + modelClearance + p.hw;
+      const topY = modelRect.top - modelClearance - p.hh;
+      const bottomY = modelRect.bottom + modelClearance + p.hh;
+
+      if (leftX >= minX) candidates.push({ x: leftX, y: clampY(p.v.sy) });
+      if (rightX <= maxX) candidates.push({ x: rightX, y: clampY(p.v.sy) });
+      if (topY >= minY) candidates.push({ x: clampX(p.v.sx), y: topY });
+      if (bottomY <= maxY) candidates.push({ x: clampX(p.v.sx), y: bottomY });
+      if (candidates.length === 0) return;
+
+      // 选择离标记点最近的可用外侧，尽量避免无谓的超长折返线。
+      candidates.sort((a, b) =>
+        Math.hypot(a.x - p.v.sx, a.y - p.v.sy) -
+        Math.hypot(b.x - p.v.sx, b.y - p.v.sy)
+      );
+      p.lx = candidates[0].x;
+      p.ly = candidates[0].y;
+    }
+
+    placed.forEach(p => { clampPlaced(p); pushOutsideModel(p); clampPlaced(p); });
+
+    // 密集标注在靠近画布边缘时需要更多轮次才能完全摊开。
+    for (let iter = 0; iter < 40; iter++) {
+      let anyOverlap = false;
+      for (let i = 0; i < placed.length; i++) {
+        for (let j = i + 1; j < placed.length; j++) {
+          const A = placed[i], B = placed[j];
+          const dx = B.lx - A.lx, dy = B.ly - A.ly;
+          const overlapX = (A.hw + B.hw) - Math.abs(dx);
+          const overlapY = (A.hh + B.hh) - Math.abs(dy);
+          if (overlapX > 0 && overlapY > 0) {
+            anyOverlap = true;
+            // 沿重叠量较小的轴推开，视觉上更自然
+            if (overlapX < overlapY) {
+              const push = (overlapX / 2 + 1) * (dx >= 0 ? 1 : -1);
+              A.lx -= push; B.lx += push;
+            } else {
+              const push = (overlapY / 2 + 1) * (dy >= 0 ? 1 : -1);
+              A.ly -= push; B.ly += push;
+            }
+          }
+        }
+      }
+      // 碰撞推开标签后再次执行模型避让，防止它被别的标签挤回实体上。
+      placed.forEach(p => { clampPlaced(p); pushOutsideModel(p); clampPlaced(p); });
+      if (!anyOverlap) break;
+    }
+
+    // 碰撞松弛可能会改变标签的相对位置，再把交叉的两条线交换终点。
+    // 对一对相交线段交换终点会缩短它们的总长度；反复处理后可以把
+    // 直线引导线解成交叉最少（通常为零）的匹配，同时不改变标签槽位集合。
+    function direction(ax, ay, bx, by, cx, cy) {
+      return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    }
+
+    function leaderLinesCross(A, B) {
+      // 起点几乎重合时不算交叉，避免一簇密集点在中心处来回交换。
+      if (Math.hypot(A.v.sx - B.v.sx, A.v.sy - B.v.sy) < 2) return false;
+      const d1 = direction(A.v.sx, A.v.sy, A.lx, A.ly, B.v.sx, B.v.sy);
+      const d2 = direction(A.v.sx, A.v.sy, A.lx, A.ly, B.lx, B.ly);
+      const d3 = direction(B.v.sx, B.v.sy, B.lx, B.ly, A.v.sx, A.v.sy);
+      const d4 = direction(B.v.sx, B.v.sy, B.lx, B.ly, A.lx, A.ly);
+      const eps = 0.01;
+      return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
+             ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
+    }
+
+    const maxUntanglePasses = Math.max(1, placed.length * placed.length);
+    for (let pass = 0; pass < maxUntanglePasses; pass++) {
+      let changed = false;
+      for (let i = 0; i < placed.length; i++) {
+        for (let j = i + 1; j < placed.length; j++) {
+          const A = placed[i], B = placed[j];
+          if (!leaderLinesCross(A, B)) continue;
+          [A.lx, B.lx] = [B.lx, A.lx];
+          [A.ly, B.ly] = [B.ly, A.ly];
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+
+    // 判断线段是否穿过矩形。矩形会比标签本身稍微扩大，给引导线留出
+    // 一圈视觉间隙，避免线贴着卡片边缘擦过。
+    function segmentHitsRect(a, b, rect) {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      let t0 = 0, t1 = 1;
+      const p = [-dx, dx, -dy, dy];
+      const q = [a.x - rect.left, rect.right - a.x, a.y - rect.top, rect.bottom - a.y];
+      for (let i = 0; i < 4; i++) {
+        if (Math.abs(p[i]) < 1e-9) {
+          if (q[i] < 0) return false;
+          continue;
+        }
+        const ratio = q[i] / p[i];
+        if (p[i] < 0) t0 = Math.max(t0, ratio);
+        else t1 = Math.min(t1, ratio);
+        if (t0 > t1) return false;
+      }
+      return true;
+    }
+
+    // 均匀避让始终保持一条直线。如果某条引导线穿过别的坐标框，
+    // 就把挡路的框沿直线法向推开；框越多，迭代会把整体逐渐摊得更散。
+    function relaxStraightLeaderObstacles(maxIterations) {
+      if (!balancedLayout) return 0;
+      let lastBlockers = 0;
+      const obstacleGap = 8;
+
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        const displacement = new Map(placed.map(p => [p, { x: 0, y: 0, count: 0 }]));
+        let blockers = 0;
+
+        placed.forEach(owner => {
+          const start = { x: owner.v.sx, y: owner.v.sy };
+          const end = { x: owner.lx, y: owner.ly };
+          const dx = end.x - start.x, dy = end.y - start.y;
+          const length = Math.hypot(dx, dy) || 1;
+          const nx = -dy / length, ny = dx / length;
+
+          placed.forEach(obstacle => {
+            if (obstacle === owner) return;
+            const obstacleRect = {
+              left: obstacle.lx - obstacle.hw - obstacleGap,
+              right: obstacle.lx + obstacle.hw + obstacleGap,
+              top: obstacle.ly - obstacle.hh - obstacleGap,
+              bottom: obstacle.ly + obstacle.hh + obstacleGap
+            };
+            if (!segmentHitsRect(start, end, obstacleRect)) return;
+
+            blockers++;
+            let side = Math.sign(direction(start.x, start.y, end.x, end.y, obstacle.lx, obstacle.ly));
+            if (side === 0) {
+              side = Math.sign(direction(start.x, start.y, end.x, end.y, obstacle.v.sx, obstacle.v.sy));
+            }
+            if (side === 0) side = obstacle.v.a.fanIndex % 2 ? 1 : -1;
+
+            const move = 11 + Math.min(17, (obstacle.hw + obstacle.hh) * 0.08);
+            // 如果首选法向已被屏幕边缘堵死，改用相反方向；否则顶部一排
+            // 标签会一直想往画布外移动，迭代再多也无法让出直线通道。
+            const minX = Math.max(margin, obstacle.hw + 8);
+            const maxX = w - Math.max(margin, obstacle.hw + 8);
+            const minY = Math.max(marginTop, obstacle.hh + 8);
+            const maxY = h - Math.max(margin, obstacle.hh + 8);
+            function availableDistance(candidateSide) {
+              const vx = nx * candidateSide, vy = ny * candidateSide;
+              let room = Infinity;
+              if (vx > 1e-6) room = Math.min(room, (maxX - obstacle.lx) / vx);
+              else if (vx < -1e-6) room = Math.min(room, (minX - obstacle.lx) / vx);
+              if (vy > 1e-6) room = Math.min(room, (maxY - obstacle.ly) / vy);
+              else if (vy < -1e-6) room = Math.min(room, (minY - obstacle.ly) / vy);
+              return Math.max(0, room);
+            }
+            const preferredRoom = availableDistance(side);
+            const oppositeRoom = availableDistance(-side);
+            if (preferredRoom < move * 0.6 && oppositeRoom > preferredRoom) side *= -1;
+
+            const delta = displacement.get(obstacle);
+            delta.x += nx * side * move;
+            delta.y += ny * side * move;
+            delta.count++;
+          });
+        });
+
+        lastBlockers = blockers;
+        if (blockers === 0) break;
+
+        placed.forEach(p => {
+          const delta = displacement.get(p);
+          if (!delta.count) return;
+          const dx = delta.x / delta.count, dy = delta.y / delta.count;
+          const length = Math.hypot(dx, dy) || 1;
+          const cap = 24;
+          p.lx += dx * Math.min(1, cap / length);
+          p.ly += dy * Math.min(1, cap / length);
+        });
+
+        // 推开挡路框后，再消除新产生的框间重叠。
+        for (let collisionPass = 0; collisionPass < 4; collisionPass++) {
+          for (let i = 0; i < placed.length; i++) {
+            for (let j = i + 1; j < placed.length; j++) {
+              const A = placed[i], B = placed[j];
+              const dx = B.lx - A.lx, dy = B.ly - A.ly;
+              const overlapX = (A.hw + B.hw) - Math.abs(dx);
+              const overlapY = (A.hh + B.hh) - Math.abs(dy);
+              if (overlapX <= 0 || overlapY <= 0) continue;
+              if (overlapX < overlapY) {
+                const push = (overlapX / 2 + 2) * (dx >= 0 ? 1 : -1);
+                A.lx -= push; B.lx += push;
+              } else {
+                const push = (overlapY / 2 + 2) * (dy >= 0 ? 1 : -1);
+                A.ly -= push; B.ly += push;
+              }
+            }
+          }
+          placed.forEach(p => { clampPlaced(p); pushOutsideModel(p); clampPlaced(p); });
+        }
+
+        // 长时间卡在同一狭窄区域时，让所有框再向标记簇外侧扩一圈。
+        if (iteration > 0 && iteration % 12 === 0) {
+          placed.forEach(p => {
+            let ox = p.lx - cx, oy = p.ly - cy;
+            const len = Math.hypot(ox, oy) || 1;
+            p.lx += ox / len * 10;
+            p.ly += oy / len * 10;
+            clampPlaced(p);
+          });
+        }
+      }
+      return lastBlockers;
+    }
+
+    if (balancedLayout) {
+      // 交替执行“清除框遮线”和“线条解交叉”；最后一轮以框不遮线为优先。
+      for (let phase = 0; phase < 3; phase++) {
+        relaxStraightLeaderObstacles(45);
+        let swapped = false;
+        for (let i = 0; i < placed.length; i++) {
+          for (let j = i + 1; j < placed.length; j++) {
+            if (!leaderLinesCross(placed[i], placed[j])) continue;
+            [placed[i].lx, placed[j].lx] = [placed[j].lx, placed[i].lx];
+            [placed[i].ly, placed[j].ly] = [placed[j].ly, placed[i].ly];
+            swapped = true;
+          }
+        }
+        if (!swapped) break;
+      }
+      relaxStraightLeaderObstacles(70);
+
+      // 对仍处于边界死角的少数标签做离散候选搜索。这里不改变线型，
+      // 只是从画面外围挑一个能让“标记点 -> 标签”直线畅通的位置。
+      const markerCenter = visible.reduce((sum, item) => {
+        sum.x += item.sx; sum.y += item.sy; return sum;
+      }, { x: 0, y: 0 });
+      markerCenter.x /= Math.max(1, visible.length);
+      markerCenter.y /= Math.max(1, visible.length);
+
+      function rectFor(p, x = p.lx, y = p.ly, gap = 0) {
+        return { left: x - p.hw - gap, right: x + p.hw + gap, top: y - p.hh - gap, bottom: y + p.hh + gap };
+      }
+
+      function rectsOverlap(a, b) {
+        return a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom;
+      }
+
+      function candidateScore(p, x, y) {
+        const candidateRect = rectFor(p, x, y, 8);
+        const candidateLine = { a: { x: p.v.sx, y: p.v.sy }, b: { x, y } };
+        let blockers = 0, overlaps = 0, crossings = 0;
+
+        placed.forEach(other => {
+          if (other === p) return;
+          const otherRect = rectFor(other, other.lx, other.ly, 8);
+          if (segmentHitsRect(candidateLine.a, candidateLine.b, otherRect)) blockers++;
+          if (segmentHitsRect(
+            { x: other.v.sx, y: other.v.sy },
+            { x: other.lx, y: other.ly },
+            candidateRect
+          )) blockers++;
+          if (rectsOverlap(candidateRect, otherRect)) overlaps++;
+
+          const testA = { v: p.v, lx: x, ly: y };
+          if (leaderLinesCross(testA, other)) crossings++;
+        });
+
+        const modelOverlap = rectsOverlap(candidateRect, modelRect) ? 1 : 0;
+        const lineLength = Math.hypot(x - p.v.sx, y - p.v.sy);
+        const movement = Math.hypot(x - p.lx, y - p.ly);
+        return blockers * 1e9 + overlaps * 1e8 + modelOverlap * 1e7 +
+               crossings * 1e6 + lineLength + movement * 0.05;
+      }
+
+      function candidatePositions(p) {
+        const minX = Math.max(margin, p.hw + 8);
+        const maxX = w - Math.max(margin, p.hw + 8);
+        const minY = Math.max(marginTop, p.hh + 8);
+        const maxY = h - Math.max(margin, p.hh + 8);
+        const result = [{ x: p.lx, y: p.ly }];
+        const maxRadius = Math.hypot(w, h) * 0.68;
+
+        for (let radius = 180; radius <= maxRadius; radius += 55) {
+          for (let step = 0; step < 48; step++) {
+            const angle = step / 48 * Math.PI * 2;
+            const x = markerCenter.x + Math.cos(angle) * radius;
+            const y = markerCenter.y + Math.sin(angle) * radius;
+            if (x >= minX && x <= maxX && y >= minY && y <= maxY) result.push({ x, y });
+          }
+        }
+
+        for (let y = minY; y <= maxY; y += 58) {
+          result.push({ x: minX, y }, { x: maxX, y });
+        }
+        for (let x = minX; x <= maxX; x += 72) {
+          result.push({ x, y: minY }, { x, y: maxY });
+        }
+        return result;
+      }
+
+      for (let searchPass = 0; searchPass < 4; searchPass++) {
+        let changed = false;
+        placed.forEach(p => {
+          let best = { x: p.lx, y: p.ly };
+          let bestScore = candidateScore(p, best.x, best.y);
+          candidatePositions(p).forEach(candidate => {
+            const score = candidateScore(p, candidate.x, candidate.y);
+            if (score < bestScore) {
+              best = candidate;
+              bestScore = score;
+            }
+          });
+          if (Math.hypot(best.x - p.lx, best.y - p.ly) > 1) {
+            p.lx = best.x; p.ly = best.y;
+            changed = true;
+          }
+        });
+        if (!changed) break;
+      }
+
+      function globalStraightLayoutScore() {
+        let blockers = 0, overlaps = 0, crossings = 0, modelOverlaps = 0, totalLength = 0;
+        placed.forEach((p, index) => {
+          const lineStart = { x: p.v.sx, y: p.v.sy };
+          const lineEnd = { x: p.lx, y: p.ly };
+          totalLength += Math.hypot(lineEnd.x - lineStart.x, lineEnd.y - lineStart.y);
+          if (rectsOverlap(rectFor(p, p.lx, p.ly, 8), modelRect)) modelOverlaps++;
+
+          placed.forEach((other, otherIndex) => {
+            if (otherIndex === index) return;
+            if (segmentHitsRect(lineStart, lineEnd, rectFor(other, other.lx, other.ly, 8))) blockers++;
+            if (otherIndex > index && rectsOverlap(
+              rectFor(p, p.lx, p.ly, 8), rectFor(other, other.lx, other.ly, 8)
+            )) overlaps++;
+            if (otherIndex > index && leaderLinesCross(p, other)) crossings++;
+          });
+        });
+        return blockers * 1e12 + overlaps * 1e10 + modelOverlaps * 1e8 + crossings * 1e7 + totalLength;
+      }
+
+      // 对交叉线尝试交换两个标签位置；只有全局评分确实改善时才保留。
+      for (let pass = 0; pass < placed.length; pass++) {
+        let improved = false;
+        for (let i = 0; i < placed.length; i++) {
+          for (let j = i + 1; j < placed.length; j++) {
+            const A = placed[i], B = placed[j];
+            if (!leaderLinesCross(A, B)) continue;
+            const before = globalStraightLayoutScore();
+            [A.lx, B.lx] = [B.lx, A.lx];
+            [A.ly, B.ly] = [B.ly, A.ly];
+            const after = globalStraightLayoutScore();
+            if (after < before) {
+              improved = true;
+            } else {
+              [A.lx, B.lx] = [B.lx, A.lx];
+              [A.ly, B.ly] = [B.ly, A.ly];
+            }
+          }
+        }
+        if (!improved) break;
+      }
+    }
+
+    placed.forEach(p => {
+      p.v.a.labelEl.style.left = p.lx + 'px';
+      p.v.a.labelEl.style.top = p.ly + 'px';
+      p.v.a.lineEl.setAttribute('x1', p.v.sx);
+      p.v.a.lineEl.setAttribute('y1', p.v.sy);
+      p.v.a.lineEl.setAttribute('x2', p.lx);
+      p.v.a.lineEl.setAttribute('y2', p.ly);
+    });
+  }
+
+  btnAnnotate.addEventListener('click', () => {
+    annotateMode = !annotateMode;
+    btnAnnotate.classList.toggle('active', annotateMode);
+    coordTip.style.display = annotateMode ? 'block' : 'none';
+  });
+
+  btnClear.addEventListener('click', clearAnnotations);
+
+  const raycaster = new THREE.Raycaster();
+  const mouseNdc = new THREE.Vector2();
+  let downX = 0, downY = 0;
+
+  renderer.domElement.addEventListener('pointerdown', e => {
+    downX = e.clientX;
+    downY = e.clientY;
+  });
+
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!annotateMode) return;
+    const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
+    if (moved > 5) return; // 认为是拖拽旋转视角，不是点击拾取
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouseNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouseNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouseNdc, camera);
+    const intersects = raycaster.intersectObject(group, true);
+    if (intersects.length > 0) {
+      addAnnotation(intersects[0].point);
+    }
+  });
+
+  return { updateAnnotations };
+}
+
+// ==================================================================
+// 路径 1：OBJ / MTL
+// ==================================================================
+function parseMTL(text) {
+  const materials = {};
+  let current = null;
+  text.split(/\r?\n/).forEach(raw => {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) return;
+    const parts = line.split(/\s+/);
+    const kw = parts[0];
+    if (kw === 'newmtl') {
+      current = parts.slice(1).join(' ');
+      materials[current] = { color: [0.7, 0.7, 0.7] };
+    } else if (kw === 'Kd' && current) {
+      materials[current].color = [parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3])];
+    }
+  });
+  return materials;
+}
+
+function parseOBJ(text, materials) {
+  const positions = [];
+  const vertexColors = [];
+  const triPositions = [];
+  const triColors = [];
+  const linePositions = [];
+  const lineColors = [];
+  let currentMaterial = null;
+  let faceCount = 0;
+  let lineCount = 0;
+
+  const resolveIndex = (raw) => {
+    const vi = parseInt(raw, 10);
+    if (Number.isNaN(vi)) return -1;
+    return vi > 0 ? vi - 1 : positions.length + vi;
+  };
+
+  text.split(/\r?\n/).forEach(raw => {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) return;
+    const parts = line.split(/\s+/);
+    const kw = parts[0];
+
+    if (kw === 'v') {
+      const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+      positions.push([x, y, z]);
+      if (parts.length >= 7 && !Number.isNaN(parseFloat(parts[4]))) {
+        vertexColors.push([parseFloat(parts[4]), parseFloat(parts[5]), parseFloat(parts[6])]);
+      } else {
+        vertexColors.push(null);
+      }
+    } else if (kw === 'usemtl') {
+      currentMaterial = parts.slice(1).join(' ');
+    } else if (kw === 'f') {
+      const idxs = parts.slice(1).map(p => resolveIndex(p.split('/')[0])).filter(i => i >= 0);
+      for (let i = 1; i < idxs.length - 1; i++) {
+        [idxs[0], idxs[i], idxs[i + 1]].forEach(vi => {
+          const p = positions[vi];
+          if (!p) return;
+          triPositions.push(p[0], p[1], p[2]);
+          let c = vertexColors[vi];
+          if (!c && currentMaterial && materials[currentMaterial]) c = materials[currentMaterial].color;
+          if (!c) c = [0.62, 0.66, 0.72];
+          triColors.push(c[0], c[1], c[2]);
+        });
+        faceCount++;
+      }
+    } else if (kw === 'l') {
+      const idxs = parts.slice(1).map(p => resolveIndex(p.split('/')[0])).filter(i => i >= 0);
+      for (let i = 0; i < idxs.length - 1; i++) {
+        [idxs[i], idxs[i + 1]].forEach(vi => {
+          const p = positions[vi];
+          if (!p) return;
+          linePositions.push(p[0], p[1], p[2]);
+          const c = vertexColors[vi] || [0.1, 0.1, 0.1];
+          lineColors.push(c[0], c[1], c[2]);
+        });
+        lineCount++;
+      }
+    }
+  });
+
+  return { positions, triPositions, triColors, linePositions, lineColors, faceCount, lineCount };
+}
+
+async function mainObj() {
+  try {
+    const objText = await fetch(modelUrl).then(r => {
+      if (!r.ok) throw new Error('无法读取 obj 文件 (HTTP ' + r.status + ')');
+      return r.text();
+    });
+
+    let materials = {};
+    if (mtlUrl) {
+      try {
+        const mtlText = await fetch(mtlUrl).then(r => r.ok ? r.text() : '');
+        if (mtlText) materials = parseMTL(mtlText);
+      } catch (e) {
+        console.warn('mtl 加载失败，忽略材质颜色:', e);
+      }
+    }
+
+    const parsed = parseOBJ(objText, materials);
+
+    if (parsed.positions.length === 0) {
+      showError('解析结果中没有找到任何顶点，请确认这是一个标准 OBJ 文件。');
+      return;
+    }
+    if (parsed.faceCount === 0 && parsed.lineCount === 0) {
+      showError('文件里只有顶点数据，没有找到任何面(f)或线(l)定义，无法构建可见的几何体。');
+      return;
+    }
+
+    renderObj(parsed);
+  } catch (err) {
+    console.error(err);
+    showError('加载或解析模型时出错：\n' + err.message);
+  }
+}
+
+function renderObj(parsed) {
+  const { scene, camera, renderer } = createSceneBasics();
+  const group = new THREE.Group();
+
+  if (parsed.faceCount > 0) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(parsed.triPositions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(parsed.triColors, 3));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 25, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    group.add(mesh);
+
+    // 面的边界轮廓：只画角度超过阈值的边，过滤掉三角化产生的对角线
+    const edgesGeo = new THREE.EdgesGeometry(geo, 15);
+    const edgesMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55 });
+    const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+    group.add(edges);
+  }
+
+  // 文件里显式定义的 "l" 线段（比如自带的描边/装饰线），保留原样单独渲染
+  if (parsed.lineCount > 0) {
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(parsed.linePositions, 3));
+    lineGeo.setAttribute('color', new THREE.Float32BufferAttribute(parsed.lineColors, 3));
+    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true });
+    group.add(new THREE.LineSegments(lineGeo, lineMat));
+  }
+
+  scene.add(group);
+  const controlsState = fitCameraAndControls(scene, camera, renderer, group);
+  addOriginMarker(group);
+  const toolbarState = setupToolbar({ scene, camera, renderer, group, grid: controlsState.grid });
+  setupViewShortcuts({ camera, group, controlsState });
+  const renderGizmo = setupAxisGizmo(camera, group);
+  loadingEl.style.display = 'none';
+  startRenderLoop(renderer, scene, camera, controlsState, toolbarState.updateAnnotations, renderGizmo);
+}
+
+// ==================================================================
+// 路径 2：STEP / STP（用 occt-import-js / OpenCascade WASM 原生解析）
+// ==================================================================
+async function mainStep() {
+  try {
+    setLoadingText('正在加载几何内核…');
+    const occt = await occtimportjs({
+      locateFile: (path) => '/vendor/' + path,
+    });
+
+    setLoadingText('正在下载 STEP 文件…');
+    const buffer = await fetch(modelUrl).then(r => {
+      if (!r.ok) throw new Error('无法读取 STEP 文件 (HTTP ' + r.status + ')');
+      return r.arrayBuffer();
+    });
+
+    setLoadingText('正在解析几何（B-rep 精确曲面）…');
+    const result = occt.ReadStepFile(new Uint8Array(buffer), null);
+
+    if (!result.success || !result.meshes || result.meshes.length === 0) {
+      showError('STEP 文件解析失败，请确认文件是否损坏，或尝试用 CAD 软件另存一次。');
+      return;
+    }
+
+    renderStep(result);
+  } catch (err) {
+    console.error(err);
+    showError('加载或解析 STEP 模型时出错：\n' + err.message);
+  }
+}
+
+// 参考 occt-import-js 官方示例的做法：按 brep_faces 把三角形分组，
+// 每组对应一个真实的 CAD 曲面 —— 分组着色 + 分组求边界，
+// EdgesGeometry 的阈值给到 180 度，意味着"只保留组内不共享的边"，
+// 也就是该曲面自身的边界，组内三角化产生的内部线全部被过滤掉。
+function buildStepMesh(geometryMesh) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(geometryMesh.attributes.position.array, 3));
+  if (geometryMesh.attributes.normal) {
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(geometryMesh.attributes.normal.array, 3));
+  } else {
+    geometry.computeVertexNormals();
+  }
+  const index = Uint32Array.from(geometryMesh.index.array);
+  geometry.setIndex(new THREE.BufferAttribute(index, 1));
+
+  const defaultColor = geometryMesh.color
+    ? new THREE.Color(geometryMesh.color[0], geometryMesh.color[1], geometryMesh.color[2])
+    : new THREE.Color(0x9aa4b2);
+  const defaultMaterial = new THREE.MeshPhongMaterial({ color: defaultColor, shininess: 25, side: THREE.DoubleSide });
+
+  const outlineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6 });
+  const edgesGroup = new THREE.Group();
+
+  let materials = [defaultMaterial];
+
+  if (geometryMesh.brep_faces && geometryMesh.brep_faces.length > 0) {
+    geometryMesh.brep_faces.forEach(f => {
+      const color = f.color ? new THREE.Color(f.color[0], f.color[1], f.color[2]) : defaultColor;
+      materials.push(new THREE.MeshPhongMaterial({ color, shininess: 25, side: THREE.DoubleSide }));
+    });
+
+    const triangleCount = index.length / 3;
+    let triangleIndex = 0;
+    let faceGroupIndex = 0;
+
+    while (triangleIndex < triangleCount) {
+      let lastIndex, materialIndex;
+      if (faceGroupIndex >= geometryMesh.brep_faces.length) {
+        lastIndex = triangleCount;
+        materialIndex = 0;
+      } else if (triangleIndex < geometryMesh.brep_faces[faceGroupIndex].first) {
+        lastIndex = geometryMesh.brep_faces[faceGroupIndex].first;
+        materialIndex = 0;
+      } else {
+        lastIndex = geometryMesh.brep_faces[faceGroupIndex].last + 1;
+        materialIndex = faceGroupIndex + 1;
+        faceGroupIndex++;
+      }
+      const firstIndex = triangleIndex;
+      geometry.addGroup(firstIndex * 3, (lastIndex - firstIndex) * 3, materialIndex);
+      triangleIndex = lastIndex;
+
+      // 每个曲面分组单独求边界，避免跨曲面/曲面内部的三角化线条混进来
+      const innerGeo = new THREE.BufferGeometry();
+      innerGeo.setAttribute('position', geometry.attributes.position);
+      if (geometry.attributes.normal) innerGeo.setAttribute('normal', geometry.attributes.normal);
+      innerGeo.setIndex(new THREE.BufferAttribute(index.slice(firstIndex * 3, lastIndex * 3), 1));
+      const innerEdges = new THREE.EdgesGeometry(innerGeo, 180);
+      edgesGroup.add(new THREE.LineSegments(innerEdges, outlineMaterial));
+    }
+  } else {
+    // 没有 brep_faces 分组信息时，退化为整体角度阈值过滤
+    const edgesGeo = new THREE.EdgesGeometry(geometry, 20);
+    edgesGroup.add(new THREE.LineSegments(edgesGeo, outlineMaterial));
+  }
+
+  const mesh = new THREE.Mesh(geometry, materials.length > 1 ? materials : materials[0]);
+  return { mesh, edges: edgesGroup };
+}
+
+// 有些 STEP 文件（常见于从装配体里整体导出）会包含彼此完全重叠的
+// 重复实体——比如同一个零件被多导出了一份，其中一份带正确的颜色信息，
+// 另一份是没有颜色的"影子"。如果两个都画出来，会发生 z-fighting
+// （深度冲突），表现为闪烁的噪点，还会把正确的颜色遮住。
+// 这里按包围盒是否基本重合来分组，每组只保留"颜色信息最丰富"的一个。
+function computeBoundingBox(geometryMesh) {
+  const pos = geometryMesh.attributes.position.array;
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pos.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      if (pos[i + k] < min[k]) min[k] = pos[i + k];
+      if (pos[i + k] > max[k]) max[k] = pos[i + k];
+    }
+  }
+  return { min, max };
+}
+
+function bboxCloseEnough(a, b) {
+  const size = [0, 1, 2].map(k => Math.max(a.max[k] - a.min[k], b.max[k] - b.min[k], 1e-6));
+  const diag = Math.hypot(size[0], size[1], size[2]);
+  const tol = Math.max(diag * 0.01, 1e-4); // 允许 1% 对角线长度的误差
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(a.min[k] - b.min[k]) > tol) return false;
+    if (Math.abs(a.max[k] - b.max[k]) > tol) return false;
+  }
+  return true;
+}
+
+function coloredFaceCount(geometryMesh) {
+  return (geometryMesh.brep_faces || []).filter(f => f.color).length;
+}
+
+function dedupeOverlappingMeshes(meshes) {
+  const withBox = meshes.map(m => ({ mesh: m, box: computeBoundingBox(m) }));
+  const used = new Array(withBox.length).fill(false);
+  const clusters = [];
+
+  for (let i = 0; i < withBox.length; i++) {
+    if (used[i]) continue;
+    const cluster = [i];
+    used[i] = true;
+    for (let j = i + 1; j < withBox.length; j++) {
+      if (!used[j] && bboxCloseEnough(withBox[i].box, withBox[j].box)) {
+        cluster.push(j);
+        used[j] = true;
+      }
+    }
+    clusters.push(cluster);
+  }
+
+  const kept = [];
+  let skippedCount = 0;
+  clusters.forEach(cluster => {
+    if (cluster.length === 1) {
+      kept.push(withBox[cluster[0]].mesh);
+      return;
+    }
+    // 重叠的一组里，优先选颜色信息最丰富（着色面最多）的那个；
+    // 打平的话再比较 mesh 自身是否带颜色。
+    let best = cluster[0];
+    cluster.forEach(idx => {
+      const bestColored = coloredFaceCount(withBox[best].mesh);
+      const curColored = coloredFaceCount(withBox[idx].mesh);
+      if (curColored > bestColored) {
+        best = idx;
+      } else if (curColored === bestColored && withBox[idx].mesh.color && !withBox[best].mesh.color) {
+        best = idx;
+      }
+    });
+    kept.push(withBox[best].mesh);
+    skippedCount += cluster.length - 1;
+  });
+
+  return { kept, skippedCount };
+}
+
+function renderStep(result) {
+  const { scene, camera, renderer } = createSceneBasics();
+  const group = new THREE.Group();
+
+  const { kept, skippedCount } = dedupeOverlappingMeshes(result.meshes);
+
+  kept.forEach(geometryMesh => {
+    const { mesh, edges } = buildStepMesh(geometryMesh);
+    group.add(mesh);
+    group.add(edges);
+  });
+
+  if (skippedCount > 0) {
+    infoEl.innerHTML += `<br><span style="opacity:0.6">已自动跳过 ${skippedCount} 个与其他实体完全重叠的重复几何体（避免颜色错乱/闪烁）</span>`;
+  }
+
+  // STEP/CAD 数据一般是 Z 轴朝上，这里转换成 three.js 习惯的 Y 轴朝上
+  group.rotation.x = -Math.PI / 2;
+
+  scene.add(group);
+  const controlsState = fitCameraAndControls(scene, camera, renderer, group);
+  addOriginMarker(group);
+  const toolbarState = setupToolbar({ scene, camera, renderer, group, grid: controlsState.grid });
+  setupViewShortcuts({ camera, group, controlsState });
+  const renderGizmo = setupAxisGizmo(camera, group);
+  loadingEl.style.display = 'none';
+  startRenderLoop(renderer, scene, camera, controlsState, toolbarState.updateAnnotations, renderGizmo);
+}
+</script>
+</body>
+</html>

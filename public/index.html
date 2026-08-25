@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PointView 3D</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --line: #e3e6ea;
+    --line-bright: #c7cbd1;
+    --text: #1f232a;
+    --muted: #6b7280;
+    --accent: #ff8a3d;
+    --accent-dim: #ff8a3d22;
+    --ok: #2f9e44;
+    --err: #d64545;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    --font-mono: "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
+    opacity: 1;
+  }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .sheet {
+    position: relative;
+    width: 100%; max-width: 620px;
+    background: var(--panel);
+    border: 1px solid var(--line-bright);
+  }
+  .corner {
+    position: absolute; width: 14px; height: 14px;
+    border-color: var(--accent); border-style: solid; border-width: 0;
+  }
+  .corner.tl { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
+  .corner.tr { top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; }
+  .corner.bl { bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; }
+  .corner.br { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
+
+  .header {
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .header .label {
+    font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 0.12em; color: var(--muted);
+    text-transform: uppercase;
+  }
+  h1 {
+    font-family: var(--font-mono);
+    font-size: 18px; font-weight: 600; margin: 4px 0 0;
+    letter-spacing: 0.01em;
+  }
+  .rev { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+  .body { padding: 26px 28px 28px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0 0 20px; line-height: 1.6; }
+  .hint code { color: var(--accent); font-family: var(--font-mono); }
+
+  .drop {
+    border: 1.5px dashed var(--line-bright);
+    padding: 34px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    position: relative;
+  }
+  .drop.drag { border-color: var(--accent); background: var(--accent-dim); }
+  .drop svg { opacity: 0.6; margin-bottom: 10px; }
+  .drop .main { font-size: 14px; }
+  .drop .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .drop input { display: none; }
+
+  .filelist { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+  .file-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 12px;
+    border: 1px solid var(--line); padding: 9px 12px;
+    background: #f7f8fa;
+  }
+  .file-row .tag {
+    display: inline-block; width: 40px; color: #ffffff; background: var(--muted);
+    font-size: 10px; text-align: center; padding: 1px 0; margin-right: 10px; border-radius: 2px;
+  }
+  .file-row.obj .tag { background: var(--accent); }
+  .file-row.mtl .tag { background: #58a6ff; }
+  .file-row.step .tag { background: #3fb950; }
+  .file-row .name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-row .clear { color: var(--muted); cursor: pointer; padding: 0 4px; }
+  .file-row .clear:hover { color: var(--err); }
+
+  .actions { margin-top: 22px; display: flex; align-items: center; gap: 14px; }
+  button.go {
+    font-family: var(--font-mono);
+    background: var(--accent); color: #1a0e04; border: none;
+    padding: 11px 20px; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.03em; cursor: pointer;
+    transition: opacity .15s;
+  }
+  button.go:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.go:not(:disabled):hover { opacity: 0.88; }
+
+  .status { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .status.err { color: var(--err); }
+  .status.ok { color: var(--ok); }
+
+  .footer {
+    border-top: 1px solid var(--line);
+    padding: 12px 28px;
+    font-family: var(--font-mono);
+    font-size: 10.5px; color: var(--muted);
+    display: flex; justify-content: space-between; letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+
+  <div class="header">
+    <div>
+      <div class="label">3D Model Loader</div>
+      <h1>PointView 3D</h1>
+    </div>
+    <div class="rev">REV.02</div>
+  </div>
+
+  <div class="body">
+    <p class="hint">上传一个 <code>.obj</code> 文件（可选附带同名 <code>.mtl</code> 材质文件），或者上传一个 <code>.stp</code> / <code>.step</code> 文件（精度更高的原生 CAD 格式，推荐优先使用）。提交后将自动跳转到对应的 3D 预览页面。</p>
+
+    <form id="form">
+      <div class="drop" id="drop">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="main">点击选择文件，或将 .obj / .mtl / .stp / .step 拖到此处</div>
+        <div class="sub">OBJ 需要同时选中 .mtl；STEP 单独上传一个 .stp/.step 即可</div>
+        <input type="file" id="fileInput" accept=".obj,.mtl,.stp,.step" multiple>
+      </div>
+
+      <div class="filelist" id="fileList"></div>
+
+      <div class="actions">
+        <button type="submit" class="go" id="goBtn" disabled>生成并打开预览</button>
+        <span class="status" id="status"></span>
+      </div>
+    </form>
+  </div>
+
+  <div class="footer">
+    <span>UPLOAD // .OBJ .MTL</span>
+    <span id="clock"></span>
+  </div>
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
+const goBtn = document.getElementById('goBtn');
+const status = document.getElementById('status');
+const form = document.getElementById('form');
+
+let objFile = null;
+let mtlFile = null;
+let stepFile = null;
+
+function renderFileList() {
+  fileList.innerHTML = '';
+  if (stepFile) {
+    fileList.appendChild(makeRow('step', stepFile, () => { stepFile = null; renderFileList(); updateGoBtn(); }));
+  } else {
+    if (objFile) fileList.appendChild(makeRow('obj', objFile, () => { objFile = null; renderFileList(); updateGoBtn(); }));
+    if (mtlFile) fileList.appendChild(makeRow('mtl', mtlFile, () => { mtlFile = null; renderFileList(); updateGoBtn(); }));
+  }
+}
+
+function makeRow(kind, file, onClear) {
+  const row = document.createElement('div');
+  row.className = 'file-row ' + kind;
+  row.innerHTML = `<span class="tag">${kind.toUpperCase()}</span><span class="name">${file.name}</span><span class="clear">✕</span>`;
+  row.querySelector('.clear').onclick = onClear;
+  return row;
+}
+
+function updateGoBtn() {
+  goBtn.disabled = !objFile && !stepFile;
+}
+
+function handleFiles(fileArr) {
+  [...fileArr].forEach(f => {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (ext === 'obj') { objFile = f; stepFile = null; }
+    else if (ext === 'mtl') { mtlFile = f; stepFile = null; }
+    else if (ext === 'stp' || ext === 'step') { stepFile = f; objFile = null; mtlFile = null; }
+  });
+  renderFileList();
+  updateGoBtn();
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+['dragenter', 'dragover'].forEach(evt =>
+  drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.add('drag'); })
+);
+['dragleave', 'drop'].forEach(evt =>
+  drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.remove('drag'); })
+);
+drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!objFile && !stepFile) return;
+  goBtn.disabled = true;
+  status.textContent = '上传中…';
+  status.className = 'status';
+
+  const fd = new FormData();
+  if (stepFile) {
+    fd.append('step', stepFile);
+  } else {
+    fd.append('obj', objFile);
+    if (mtlFile) fd.append('mtl', mtlFile);
+  }
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '上传失败');
+    status.textContent = '完成，正在打开预览…';
+    status.className = 'status ok';
+    const params = new URLSearchParams({
+      type: data.type,
+      model: data.modelUrl,
+      mtl: data.mtlUrl || '',
+      name: data.modelName || '',
+    });
+    window.location.href = `/viewer.html?${params.toString()}`;
+  } catch (err) {
+    status.textContent = '错误: ' + err.message;
+    status.className = 'status err';
+    goBtn.disabled = false;
+  }
+});
+
+function tick() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
