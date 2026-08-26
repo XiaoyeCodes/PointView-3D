@@ -36,13 +36,14 @@
     border: 1px solid #d7dae0; border-radius: 8px;
     padding: 8px; backdrop-filter: blur(4px);
     box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    z-index: 7;
   }
   .tool-btn {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 12.5px; color: #2a2e35;
     background: #eef0f3; border: 1px solid #d7dae0; border-radius: 6px;
     padding: 8px 14px; cursor: pointer; user-select: none;
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0;
     transition: background .15s, border-color .15s;
   }
   .tool-btn:hover { background: #e3e6ea; }
@@ -50,7 +51,7 @@
   .tool-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa1ab; }
   .tool-btn.active .dot { background: #1a0e04; }
   .layout-control {
-    display: flex; align-items: center; gap: 7px; white-space: nowrap;
+    display: flex; align-items: center; gap: 7px; white-space: nowrap; flex-shrink: 0;
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 12.5px; color: #2a2e35;
     background: #eef0f3; border: 1px solid #d7dae0; border-radius: 6px;
@@ -62,6 +63,16 @@
     padding: 3px 24px 3px 7px; outline: none;
   }
   #annotation-layout-mode:focus { border-color: #ff8a3d; }
+  #annotation-layout-mode:disabled { cursor: not-allowed; opacity: 0.55; }
+  .check-control {
+    display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 12.5px; color: #2a2e35;
+    background: #eef0f3; border: 1px solid #d7dae0; border-radius: 6px;
+    padding: 7px 10px; cursor: pointer; user-select: none;
+  }
+  .check-control:hover { background: #e3e6ea; }
+  .check-control input { margin: 0; accent-color: #ff8a3d; cursor: pointer; }
 
   #view-shortcuts {
     position: absolute; top: 64px; right: 16px; z-index: 6;
@@ -181,6 +192,14 @@
       <option value="near">就近布局</option>
       <option value="balanced" selected>均匀避让</option>
     </select>
+  </label>
+  <label class="check-control" title="旋转、平移或缩放视图时保持坐标框位置不变">
+    <input type="checkbox" id="lock-annotation-positions">
+    锁定标注
+  </label>
+  <label class="check-control" title="显示或隐藏模型原点处的坐标系">
+    <input type="checkbox" id="show-origin-marker" checked>
+    中心坐标系
   </label>
   <div class="tool-btn" id="btn-import"><span class="dot"></span>导入坐标数据</div>
   <div class="tool-btn" id="btn-clear-annotate"><span class="dot"></span>清除标注</div>
@@ -574,16 +593,23 @@ function addOriginMarker(group) {
 // 表面，实时算出该点在原始 STEP/OBJ 坐标系下的精确 XYZ 坐标并标注出来，
 // 效果上也是"在模型上展示坐标"，只是数值来自你点的位置，而不是文件里
 // 预置的公差数据。
-function setupToolbar({ scene, camera, renderer, group, grid }) {
+function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   const btnGrid = document.getElementById('btn-grid');
   const btnAnnotate = document.getElementById('btn-annotate');
   const btnClear = document.getElementById('btn-clear-annotate');
+  const lockAnnotationInput = document.getElementById('lock-annotation-positions');
+  const showOriginMarkerInput = document.getElementById('show-origin-marker');
   const coordTip = document.getElementById('coord-tip');
 
   // ---- 网格显示/隐藏 ----
   btnGrid.addEventListener('click', () => {
     grid.visible = !grid.visible;
     btnGrid.classList.toggle('active', grid.visible);
+  });
+
+  // 模型原点处的坐标系与右下角视角坐标轴相互独立，只控制中间这一组。
+  showOriginMarkerInput.addEventListener('change', () => {
+    originMarker.visible = showOriginMarkerInput.checked;
   });
 
   // ---- 导入坐标数据 ----
@@ -653,6 +679,8 @@ function setupToolbar({ scene, camera, renderer, group, grid }) {
   const layoutModeSelect = document.getElementById('annotation-layout-mode');
   const svgNS = 'http://www.w3.org/2000/svg';
   const annotationList = []; // { worldPoint, dot(3D mesh), labelEl, lineEl }
+  let annotationPositionsLocked = false;
+  let annotationLayoutDirty = false;
 
   const LABEL_OFFSET_DIST = 90; // 标签相对标记点的屏幕像素偏移距离
   // 模型本身不会移动，缓存世界坐标包围盒；相机旋转/缩放时只需重新投影
@@ -702,7 +730,11 @@ function setupToolbar({ scene, camera, renderer, group, grid }) {
     lineEl.setAttribute('stroke-opacity', '0.8');
     leaderSvg.appendChild(lineEl);
 
-    annotationList.push({ worldPoint: worldPoint.clone(), dot, labelEl, lineEl, fanIndex: annotationList.length });
+    annotationList.push({
+      worldPoint: worldPoint.clone(), dot, labelEl, lineEl,
+      fanIndex: annotationList.length, lockedLabelX: null, lockedLabelY: null
+    });
+    annotationLayoutDirty = true;
   }
 
   // 导入坐标数据（局部/文件坐标系）时用这个：先转换成世界坐标再复用同一套
@@ -721,7 +753,34 @@ function setupToolbar({ scene, camera, renderer, group, grid }) {
       a.lineEl.remove();
     });
     annotationList.length = 0;
+    annotationLayoutDirty = false;
   }
+
+  lockAnnotationInput.addEventListener('change', () => {
+    annotationPositionsLocked = lockAnnotationInput.checked;
+    layoutModeSelect.disabled = annotationPositionsLocked;
+
+    if (annotationPositionsLocked) {
+      // 以勾选瞬间的屏幕位置为锁定位置。此后相机仍可旋转、平移和缩放，
+      // 坐标框保持不动，只让直线的测点端继续跟随三维位置。
+      annotationLayoutDirty = false;
+      annotationList.forEach(a => {
+        const x = parseFloat(a.labelEl.style.left);
+        const y = parseFloat(a.labelEl.style.top);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          a.lockedLabelX = x;
+          a.lockedLabelY = y;
+        } else {
+          annotationLayoutDirty = true;
+        }
+      });
+    } else {
+      annotationList.forEach(a => {
+        a.lockedLabelX = null;
+        a.lockedLabelY = null;
+      });
+    }
+  });
 
   // 每帧把 3D 坐标投影到屏幕像素坐标，标签沿"画布中心 -> 标记点"的方向
   // 再往外偏移一段固定像素距离——这样标签会自然地被推向画面空白处，
@@ -748,6 +807,22 @@ function setupToolbar({ scene, camera, renderer, group, grid }) {
       a.lineEl.style.display = 'block';
       visible.push({ a, sx: (tmp.x * 0.5 + 0.5) * w, sy: (-tmp.y * 0.5 + 0.5) * h });
     });
+
+    // 锁定后跳过布局计算，仅更新测点的屏幕投影和直线起点。
+    // 新增标注时会临时执行一次完整布局，再把新位置一并锁住。
+    if (annotationPositionsLocked && !annotationLayoutDirty) {
+      visible.forEach(v => {
+        const lx = v.a.lockedLabelX;
+        const ly = v.a.lockedLabelY;
+        v.a.labelEl.style.left = lx + 'px';
+        v.a.labelEl.style.top = ly + 'px';
+        v.a.lineEl.setAttribute('x1', v.sx);
+        v.a.lineEl.setAttribute('y1', v.sy);
+        v.a.lineEl.setAttribute('x2', lx);
+        v.a.lineEl.setAttribute('y2', ly);
+      });
+      return;
+    }
 
     // 把模型世界包围盒投影成屏幕矩形。标签布局会把这个矩形视为禁入区，
     // 因而在视角变化时仍会尽量待在实体外侧。
@@ -1211,7 +1286,12 @@ function setupToolbar({ scene, camera, renderer, group, grid }) {
       p.v.a.lineEl.setAttribute('y1', p.v.sy);
       p.v.a.lineEl.setAttribute('x2', p.lx);
       p.v.a.lineEl.setAttribute('y2', p.ly);
+      if (annotationPositionsLocked) {
+        p.v.a.lockedLabelX = p.lx;
+        p.v.a.lockedLabelY = p.ly;
+      }
     });
+    annotationLayoutDirty = false;
   }
 
   btnAnnotate.addEventListener('click', () => {
@@ -1401,8 +1481,8 @@ function renderObj(parsed) {
 
   scene.add(group);
   const controlsState = fitCameraAndControls(scene, camera, renderer, group);
-  addOriginMarker(group);
-  const toolbarState = setupToolbar({ scene, camera, renderer, group, grid: controlsState.grid });
+  const originMarker = addOriginMarker(group);
+  const toolbarState = setupToolbar({ scene, camera, renderer, group, grid: controlsState.grid, originMarker });
   setupViewShortcuts({ camera, group, controlsState });
   const renderGizmo = setupAxisGizmo(camera, group);
   loadingEl.style.display = 'none';
@@ -1608,8 +1688,8 @@ function renderStep(result) {
 
   scene.add(group);
   const controlsState = fitCameraAndControls(scene, camera, renderer, group);
-  addOriginMarker(group);
-  const toolbarState = setupToolbar({ scene, camera, renderer, group, grid: controlsState.grid });
+  const originMarker = addOriginMarker(group);
+  const toolbarState = setupToolbar({ scene, camera, renderer, group, grid: controlsState.grid, originMarker });
   setupViewShortcuts({ camera, group, controlsState });
   const renderGizmo = setupAxisGizmo(camera, group);
   loadingEl.style.display = 'none';
