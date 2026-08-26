@@ -30,11 +30,14 @@ PointView 3D 是一个运行在浏览器中的三维模型查看与测点标注�
 
 停止服务时双击 `stop.bat`。
 
+如果新电脑提示找不到 Node.js 或 npm，双击 `repair.bat`。脚本会修复常见的 PATH 问题，缺少 Node.js 时通过 Windows Package Manager 安装官方 LTS 版本，然后安装项目依赖并启动服务。安装过程可能出现 Windows 管理员授权窗口。
+
 脚本也支持无暂停模式，方便在终端或其他工具中调用。
 
 ```bat
 start.bat --no-pause
 stop.bat --no-pause
+repair.bat --no-pause
 ```
 
 ### macOS 与 Linux
@@ -103,6 +106,7 @@ PointView-3D
 │  └─ viewer.html             三维查看器
 ├─ uploads                    本地上传文件目录
 ├─ server.js                  Express 服务
+├─ repair.bat                 Windows 一键环境修复脚本
 ├─ start.bat                  Windows 启动脚本
 └─ stop.bat                   Windows 停止脚本
 ```

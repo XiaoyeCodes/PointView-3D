@@ -18,7 +18,7 @@ goto parse_args
 where node >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Node.js was not found in PATH.
-  echo Install Node.js and run this file again.
+  echo Double-click repair.bat to install or repair it automatically.
   set "EXIT_CODE=1"
   goto finish
 )
@@ -26,6 +26,7 @@ if errorlevel 1 (
 where npm >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] npm was not found in PATH.
+  echo Double-click repair.bat to repair Node.js and project dependencies.
   set "EXIT_CODE=1"
   goto finish
 )
