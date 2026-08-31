@@ -37,7 +37,10 @@
     padding: 8px; backdrop-filter: blur(4px);
     box-shadow: 0 2px 10px rgba(0,0,0,0.06);
     z-index: 7;
+    opacity: 0;
+    transition: opacity .18s ease;
   }
+  #toolbar:hover, #toolbar:focus-within { opacity: 1; }
   .tool-btn {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 12.5px; color: #2a2e35;
@@ -76,7 +79,7 @@
 
   #view-shortcuts {
     position: absolute; top: 64px; right: 16px; z-index: 6;
-    width: 212px; padding: 9px;
+    width: 56px; padding: 9px;
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: rgba(255, 255, 255, 0.86); border: 1px solid #d7dae0;
     border-radius: 8px; backdrop-filter: blur(5px);
@@ -86,7 +89,7 @@
     margin: 0 0 7px 2px; color: #6b7280; font-size: 11.5px;
   }
   #view-shortcuts .view-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+    display: grid; grid-template-columns: 1fr; gap: 5px;
   }
   .view-btn {
     height: 38px; padding: 0; cursor: pointer; user-select: none;
@@ -169,8 +172,8 @@
 
   #gizmo-frame {
     position: absolute; right: 16px; bottom: 16px;
-    width: 192px; height: 192px;
-    border: 1px solid #d7dae0; border-radius: 10px;
+    width: 96px; height: 96px;
+    border: 0; background: transparent;
     overflow: hidden; pointer-events: none;
   }
 </style>
@@ -184,7 +187,7 @@
 <svg id="leader-svg"></svg>
 <div id="annotation-layer"></div>
 <div id="toolbar">
-  <div class="tool-btn active" id="btn-grid"><span class="dot"></span>网格</div>
+  <div class="tool-btn" id="btn-grid"><span class="dot"></span>网格</div>
   <div class="tool-btn" id="btn-annotate"><span class="dot"></span>坐标标注</div>
   <label class="layout-control" title="切换坐标标签的排列方式">
     标注布局
@@ -198,7 +201,7 @@
     锁定标注
   </label>
   <label class="check-control" title="显示或隐藏模型原点处的坐标系">
-    <input type="checkbox" id="show-origin-marker" checked>
+    <input type="checkbox" id="show-origin-marker">
     中心坐标系
   </label>
   <div class="tool-btn" id="btn-import"><span class="dot"></span>导入坐标数据</div>
@@ -338,6 +341,10 @@ function fitCameraAndControls(scene, camera, renderer, group) {
   camera.position.set(fitRadius * 0.6, fitRadius * 0.5, fitRadius * 0.8);
 
   const grid = new THREE.GridHelper(Math.max(10, maxDim * 6), 20, 0xaab0b8, 0xd7dae0);
+  // 模型已按包围盒中心移到原点，底面位于 -size.y / 2。
+  // 网格再略微下沉，避免与贴近底部的几何面产生深度闪烁。
+  grid.position.y = -size.y / 2 - maxDim * 0.002;
+  grid.visible = false;
   scene.add(grid);
 
   let controls = null;
@@ -483,12 +490,12 @@ function startRenderLoop(renderer, scene, camera, controlsState, onFrame, afterR
 // 模型坐标系的旋转。使用独立的小画布，避免主画布的像素比和 viewport
 // 状态影响右下角控件的显示。
 function setupAxisGizmo(mainCamera, coordinateObject) {
-  const sizeCss = 192;  // 显示的正方形区域边长（css 像素，放大一倍）
+  const sizeCss = 96;
 
   const gizmoScene = new THREE.Scene();
-  gizmoScene.background = new THREE.Color(0xeef0f3);
   const gizmoCamera = new THREE.OrthographicCamera(-1.7, 1.7, 1.7, -1.7, 0.1, 10);
-  const gizmoRenderer = new THREE.WebGLRenderer({ antialias: true });
+  const gizmoRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  gizmoRenderer.setClearColor(0x000000, 0);
   gizmoRenderer.setPixelRatio(window.devicePixelRatio);
   gizmoRenderer.setSize(sizeCss, sizeCss, false);
   gizmoRenderer.domElement.style.cssText = 'display:block;width:100%;height:100%';
@@ -601,6 +608,9 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   const showOriginMarkerInput = document.getElementById('show-origin-marker');
   const coordTip = document.getElementById('coord-tip');
 
+  grid.visible = false;
+  originMarker.visible = false;
+
   // ---- 网格显示/隐藏 ----
   btnGrid.addEventListener('click', () => {
     grid.visible = !grid.visible;
@@ -683,17 +693,26 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   let annotationLayoutDirty = false;
 
   const LABEL_OFFSET_DIST = 90; // 标签相对标记点的屏幕像素偏移距离
+  const MODEL_CLEARANCE_RATIO = 0.05;
   // 模型本身不会移动，缓存世界坐标包围盒；相机旋转/缩放时只需重新投影
   // 8 个角点，避免每帧遍历整个 STEP/OBJ 网格。
   const modelWorldBox = new THREE.Box3().setFromObject(group);
-  const modelBoxCorners = [];
-  for (const x of [modelWorldBox.min.x, modelWorldBox.max.x]) {
-    for (const y of [modelWorldBox.min.y, modelWorldBox.max.y]) {
-      for (const z of [modelWorldBox.min.z, modelWorldBox.max.z]) {
-        modelBoxCorners.push(new THREE.Vector3(x, y, z));
+  const modelSize = modelWorldBox.getSize(new THREE.Vector3());
+  const modelClearance = Math.max(modelSize.x, modelSize.y, modelSize.z) * MODEL_CLEARANCE_RATIO;
+  const modelClearanceWorldBox = modelWorldBox.clone().expandByScalar(modelClearance);
+
+  function boxCorners(box) {
+    const corners = [];
+    for (const x of [box.min.x, box.max.x]) {
+      for (const y of [box.min.y, box.max.y]) {
+        for (const z of [box.min.z, box.max.z]) {
+          corners.push(new THREE.Vector3(x, y, z));
+        }
       }
     }
+    return corners;
   }
+  const modelClearanceBoxCorners = boxCorners(modelClearanceWorldBox);
 
   function addAnnotation(worldPoint, label) {
     // 转换回模型自身的局部坐标系（也就是原始 STEP/OBJ 文件里的坐标），
@@ -824,18 +843,22 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
       return;
     }
 
-    // 把模型世界包围盒投影成屏幕矩形。标签布局会把这个矩形视为禁入区，
-    // 因而在视角变化时仍会尽量待在实体外侧。
-    const modelRect = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
-    modelBoxCorners.forEach(corner => {
-      tmp.copy(corner).project(camera);
-      const px = (tmp.x * 0.5 + 0.5) * w;
-      const py = (-tmp.y * 0.5 + 0.5) * h;
-      modelRect.left = Math.min(modelRect.left, px);
-      modelRect.top = Math.min(modelRect.top, py);
-      modelRect.right = Math.max(modelRect.right, px);
-      modelRect.bottom = Math.max(modelRect.bottom, py);
-    });
+    // 把向外扩张 5% 最大边长后的模型安全包围盒投影到屏幕。
+    // 均匀避让以安全矩形为硬禁入区，因此缩放视图时，间隙仍对应模型实际尺寸。
+    function projectCornersToRect(corners) {
+      const projectedRect = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+      corners.forEach(corner => {
+        tmp.copy(corner).project(camera);
+        const px = (tmp.x * 0.5 + 0.5) * w;
+        const py = (-tmp.y * 0.5 + 0.5) * h;
+        projectedRect.left = Math.min(projectedRect.left, px);
+        projectedRect.top = Math.min(projectedRect.top, py);
+        projectedRect.right = Math.max(projectedRect.right, px);
+        projectedRect.bottom = Math.max(projectedRect.bottom, py);
+      });
+      return projectedRect;
+    }
+    const modelClearanceRect = projectCornersToRect(modelClearanceBoxCorners);
 
     // 第二遍：把屏幕上靠得很近的点分成一组（比如导入的一批 CMM 测量点
     // 经常物理位置就挨得很近），同一组内的标签先按圆周均匀分布展开，
@@ -899,14 +922,11 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
       p.ly = Math.max(Math.max(marginTop, p.hh + 8), Math.min(h - Math.max(margin, p.hh + 8), p.ly));
     }
 
-    // 标记越多，标签与实体之间保留的空隙越大，引导线也会自然拉长。
-    const modelClearance = 18 + Math.min(110, Math.max(0, visible.length - 4) * 7);
-
     function pushOutsideModel(p) {
       if (!balancedLayout) return;
       const overlapsModel =
-        p.lx + p.hw > modelRect.left && p.lx - p.hw < modelRect.right &&
-        p.ly + p.hh > modelRect.top && p.ly - p.hh < modelRect.bottom;
+        p.lx + p.hw > modelClearanceRect.left && p.lx - p.hw < modelClearanceRect.right &&
+        p.ly + p.hh > modelClearanceRect.top && p.ly - p.hh < modelClearanceRect.bottom;
       if (!overlapsModel) return;
 
       const minX = Math.max(margin, p.hw + 8);
@@ -917,10 +937,10 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
       const clampY = y => Math.max(minY, Math.min(maxY, y));
       const candidates = [];
 
-      const leftX = modelRect.left - modelClearance - p.hw;
-      const rightX = modelRect.right + modelClearance + p.hw;
-      const topY = modelRect.top - modelClearance - p.hh;
-      const bottomY = modelRect.bottom + modelClearance + p.hh;
+      const leftX = modelClearanceRect.left - p.hw;
+      const rightX = modelClearanceRect.right + p.hw;
+      const topY = modelClearanceRect.top - p.hh;
+      const bottomY = modelClearanceRect.bottom + p.hh;
 
       if (leftX >= minX) candidates.push({ x: leftX, y: clampY(p.v.sy) });
       if (rightX <= maxX) candidates.push({ x: rightX, y: clampY(p.v.sy) });
@@ -1165,6 +1185,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
 
       function candidateScore(p, x, y) {
         const candidateRect = rectFor(p, x, y, 8);
+        const candidateLabelRect = rectFor(p, x, y);
         const candidateLine = { a: { x: p.v.sx, y: p.v.sy }, b: { x, y } };
         let blockers = 0, overlaps = 0, crossings = 0;
 
@@ -1183,11 +1204,22 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
           if (leaderLinesCross(testA, other)) crossings++;
         });
 
-        const modelOverlap = rectsOverlap(candidateRect, modelRect) ? 1 : 0;
+        if (rectsOverlap(candidateLabelRect, modelClearanceRect)) return Number.POSITIVE_INFINITY;
+        const gapX = Math.max(
+          modelClearanceRect.left - candidateLabelRect.right,
+          candidateLabelRect.left - modelClearanceRect.right,
+          0
+        );
+        const gapY = Math.max(
+          modelClearanceRect.top - candidateLabelRect.bottom,
+          candidateLabelRect.top - modelClearanceRect.bottom,
+          0
+        );
+        const distanceFromModel = Math.hypot(gapX, gapY);
         const lineLength = Math.hypot(x - p.v.sx, y - p.v.sy);
         const movement = Math.hypot(x - p.lx, y - p.ly);
-        return blockers * 1e9 + overlaps * 1e8 + modelOverlap * 1e7 +
-               crossings * 1e6 + lineLength + movement * 0.05;
+        return overlaps * 1e14 + distanceFromModel * 1e9 + blockers * 1e6 +
+               crossings * 1e5 + lineLength + movement * 0.05;
       }
 
       function candidatePositions(p) {
@@ -1197,6 +1229,45 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
         const maxY = h - Math.max(margin, p.hh + 8);
         const result = [{ x: p.lx, y: p.ly }];
         const maxRadius = Math.hypot(w, h) * 0.68;
+        const clampX = x => Math.max(minX, Math.min(maxX, x));
+        const clampY = y => Math.max(minY, Math.min(maxY, y));
+
+        const nearestModelEdgePositions = [
+          { x: modelClearanceRect.left - p.hw, y: clampY(p.v.sy) },
+          { x: modelClearanceRect.right + p.hw, y: clampY(p.v.sy) },
+          { x: clampX(p.v.sx), y: modelClearanceRect.top - p.hh },
+          { x: clampX(p.v.sx), y: modelClearanceRect.bottom + p.hh }
+        ];
+        nearestModelEdgePositions.forEach(position => {
+          if (position.x >= minX && position.x <= maxX &&
+              position.y >= minY && position.y <= maxY) result.push(position);
+        });
+
+        // 沿 5% 安全矩形的四边生成槽位。密集标注可以均匀占据模型周围，
+        // 而不必为了躲避其他引导线被搜索到画布边缘。
+        const leftX = modelClearanceRect.left - p.hw;
+        const rightX = modelClearanceRect.right + p.hw;
+        const topY = modelClearanceRect.top - p.hh;
+        const bottomY = modelClearanceRect.bottom + p.hh;
+        const edgeStepX = Math.max(56, p.hw * 2 + 10);
+        const edgeStepY = Math.max(56, p.hh * 2 + 10);
+        const edgeMinX = clampX(modelClearanceRect.left);
+        const edgeMaxX = clampX(modelClearanceRect.right);
+        const edgeMinY = clampY(modelClearanceRect.top);
+        const edgeMaxY = clampY(modelClearanceRect.bottom);
+
+        if (leftX >= minX) {
+          for (let y = edgeMinY; y <= edgeMaxY; y += edgeStepY) result.push({ x: leftX, y });
+        }
+        if (rightX <= maxX) {
+          for (let y = edgeMinY; y <= edgeMaxY; y += edgeStepY) result.push({ x: rightX, y });
+        }
+        if (topY >= minY) {
+          for (let x = edgeMinX; x <= edgeMaxX; x += edgeStepX) result.push({ x, y: topY });
+        }
+        if (bottomY <= maxY) {
+          for (let x = edgeMinX; x <= edgeMaxX; x += edgeStepX) result.push({ x, y: bottomY });
+        }
 
         for (let radius = 180; radius <= maxRadius; radius += 55) {
           for (let step = 0; step < 48; step++) {
@@ -1242,7 +1313,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
           const lineStart = { x: p.v.sx, y: p.v.sy };
           const lineEnd = { x: p.lx, y: p.ly };
           totalLength += Math.hypot(lineEnd.x - lineStart.x, lineEnd.y - lineStart.y);
-          if (rectsOverlap(rectFor(p, p.lx, p.ly, 8), modelRect)) modelOverlaps++;
+          if (rectsOverlap(rectFor(p, p.lx, p.ly), modelClearanceRect)) modelOverlaps++;
 
           placed.forEach((other, otherIndex) => {
             if (otherIndex === index) return;
@@ -1253,7 +1324,8 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
             if (otherIndex > index && leaderLinesCross(p, other)) crossings++;
           });
         });
-        return blockers * 1e12 + overlaps * 1e10 + modelOverlaps * 1e8 + crossings * 1e7 + totalLength;
+        return modelOverlaps * 1e15 + blockers * 1e12 + overlaps * 1e10 +
+               crossings * 1e7 + totalLength;
       }
 
       // 对交叉线尝试交换两个标签位置；只有全局评分确实改善时才保留。
@@ -1280,6 +1352,9 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
     }
 
     placed.forEach(p => {
+      clampPlaced(p);
+      pushOutsideModel(p);
+      clampPlaced(p);
       p.v.a.labelEl.style.left = p.lx + 'px';
       p.v.a.labelEl.style.top = p.ly + 'px';
       p.v.a.lineEl.setAttribute('x1', p.v.sx);
