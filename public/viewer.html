@@ -1520,7 +1520,20 @@ async function mainStep() {
   }
 }
 
-// 参考 occt-import-js 官方示例的做法：按 brep_faces 把三角形分组，
+// 当前内置的 occt-import-js 会把 STEP 中的 sRGB 颜色转换成线性 RGB 后输出。
+// Three.js r128 的 Color 在这里按显示值使用，因此要转回 sRGB，才能还原
+// STEP 文件里的 COLOUR_RGB 数值。比如本测试模型的 Pale Tan 会从解析结果
+// (0.651, 0.509, 0.407) 恢复成文件中声明的 (0.827, 0.741, 0.671)。
+function stepColorToThree(color, fallback) {
+  if (!color) return fallback ? fallback.clone() : new THREE.Color(0x9aa4b2);
+  return new THREE.Color(color[0], color[1], color[2]).convertLinearToSRGB();
+}
+
+function stepColorKey(color) {
+  return color.map(value => value.toFixed(6)).join(',');
+}
+
+// 参考 occt-import-js 官方数据结构：按 brep_faces 把三角形分组，
 // 每组对应一个真实的 CAD 曲面 —— 分组着色 + 分组求边界，
 // EdgesGeometry 的阈值给到 180 度，意味着"只保留组内不共享的边"，
 // 也就是该曲面自身的边界，组内三角化产生的内部线全部被过滤掉。
@@ -1535,20 +1548,29 @@ function buildStepMesh(geometryMesh) {
   const index = Uint32Array.from(geometryMesh.index.array);
   geometry.setIndex(new THREE.BufferAttribute(index, 1));
 
-  const defaultColor = geometryMesh.color
-    ? new THREE.Color(geometryMesh.color[0], geometryMesh.color[1], geometryMesh.color[2])
-    : new THREE.Color(0x9aa4b2);
+  const defaultColor = stepColorToThree(geometryMesh.color);
   const defaultMaterial = new THREE.MeshPhongMaterial({ color: defaultColor, shininess: 25, side: THREE.DoubleSide });
 
   const outlineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6 });
   const edgesGroup = new THREE.Group();
 
-  let materials = [defaultMaterial];
+  const materials = [defaultMaterial];
+  const materialIndexByColor = new Map();
+  const faceMaterialIndices = [];
 
   if (geometryMesh.brep_faces && geometryMesh.brep_faces.length > 0) {
     geometryMesh.brep_faces.forEach(f => {
-      const color = f.color ? new THREE.Color(f.color[0], f.color[1], f.color[2]) : defaultColor;
-      materials.push(new THREE.MeshPhongMaterial({ color, shininess: 25, side: THREE.DoubleSide }));
+      if (!f.color) {
+        faceMaterialIndices.push(0);
+        return;
+      }
+      const key = stepColorKey(f.color);
+      if (!materialIndexByColor.has(key)) {
+        const color = stepColorToThree(f.color, defaultColor);
+        materials.push(new THREE.MeshPhongMaterial({ color, shininess: 25, side: THREE.DoubleSide }));
+        materialIndexByColor.set(key, materials.length - 1);
+      }
+      faceMaterialIndices.push(materialIndexByColor.get(key));
     });
 
     const triangleCount = index.length / 3;
@@ -1565,7 +1587,7 @@ function buildStepMesh(geometryMesh) {
         materialIndex = 0;
       } else {
         lastIndex = geometryMesh.brep_faces[faceGroupIndex].last + 1;
-        materialIndex = faceGroupIndex + 1;
+        materialIndex = faceMaterialIndices[faceGroupIndex];
         faceGroupIndex++;
       }
       const firstIndex = triangleIndex;
@@ -1623,6 +1645,20 @@ function coloredFaceCount(geometryMesh) {
   return (geometryMesh.brep_faces || []).filter(f => f.color).length;
 }
 
+function getStepColorStats(meshes) {
+  const colors = new Set();
+  let coloredFaces = 0;
+  meshes.forEach(mesh => {
+    if (mesh.color) colors.add(stepColorKey(mesh.color));
+    (mesh.brep_faces || []).forEach(face => {
+      if (!face.color) return;
+      colors.add(stepColorKey(face.color));
+      coloredFaces++;
+    });
+  });
+  return { colorCount: colors.size, coloredFaces };
+}
+
 function dedupeOverlappingMeshes(meshes) {
   const withBox = meshes.map(m => ({ mesh: m, box: computeBoundingBox(m) }));
   const used = new Array(withBox.length).fill(false);
@@ -1672,6 +1708,7 @@ function renderStep(result) {
   const group = new THREE.Group();
 
   const { kept, skippedCount } = dedupeOverlappingMeshes(result.meshes);
+  const colorStats = getStepColorStats(kept);
 
   kept.forEach(geometryMesh => {
     const { mesh, edges } = buildStepMesh(geometryMesh);
@@ -1681,6 +1718,9 @@ function renderStep(result) {
 
   if (skippedCount > 0) {
     infoEl.innerHTML += `<br><span style="opacity:0.6">已自动跳过 ${skippedCount} 个与其他实体完全重叠的重复几何体（避免颜色错乱/闪烁）</span>`;
+  }
+  if (colorStats.colorCount > 0) {
+    infoEl.innerHTML += `<br><span style="opacity:0.6">已读取 STEP 原始颜色：${colorStats.colorCount} 种可见颜色，${colorStats.coloredFaces} 个独立着色面</span>`;
   }
 
   // STEP/CAD 数据一般是 Z 轴朝上，这里转换成 three.js 习惯的 Y 轴朝上
