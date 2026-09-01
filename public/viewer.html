@@ -166,6 +166,43 @@
     overflow-wrap: anywhere;
   }
 
+  #measure-panel {
+    position: absolute; top: 92px; left: 16px; z-index: 6;
+    display: none; width: 315px; box-sizing: border-box;
+    padding: 12px 14px;
+    color: #2a2e35; background: rgba(255, 255, 255, 0.88);
+    border: 1px solid #d7dae0; border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    backdrop-filter: blur(5px);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .measure-heading {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 10px; font-size: 13px;
+  }
+  .measure-heading select {
+    font: inherit; font-size: 12px; color: #2a2e35;
+    background: #fff; border: 1px solid #c8cdd4; border-radius: 5px;
+    padding: 3px 7px; outline: none;
+  }
+  #measure-status {
+    margin: 0 0 9px; color: #6b7280; font-size: 12px; line-height: 1.45;
+  }
+  #measure-panel dl {
+    display: grid; grid-template-columns: 86px minmax(0, 1fr);
+    gap: 6px 10px; margin: 0; font-size: 12px; line-height: 1.45;
+  }
+  #measure-panel dt { color: #6b7280; }
+  #measure-panel dd {
+    min-width: 0; margin: 0; color: #1a1d23;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  #measure-distance,
+  #measure-delta,
+  #measure-projection,
+  #measure-perpendicular { font-weight: 700; }
+
   #import-modal {
     position: absolute; inset: 0; display: none;
     align-items: center; justify-content: center;
@@ -230,10 +267,32 @@
     <dt>法向</dt><dd id="face-info-normal"></dd>
   </dl>
 </aside>
+<aside id="measure-panel" aria-live="polite">
+  <div class="measure-heading">
+    <strong>点到点测量</strong>
+    <label>参考轴
+      <select id="measure-axis" aria-label="投影参考轴">
+        <option value="x">X 轴</option>
+        <option value="y">Y 轴</option>
+        <option value="z">Z 轴</option>
+      </select>
+    </label>
+  </div>
+  <p id="measure-status">请点击模型上的第一个点</p>
+  <dl>
+    <dt>点 A</dt><dd id="measure-point-a">-</dd>
+    <dt>点 B</dt><dd id="measure-point-b">-</dd>
+    <dt>空间距离</dt><dd id="measure-distance">-</dd>
+    <dt>坐标差</dt><dd id="measure-delta">-</dd>
+    <dt>轴向投影</dt><dd id="measure-projection">-</dd>
+    <dt>垂直轴向距离</dt><dd id="measure-perpendicular">-</dd>
+  </dl>
+</aside>
 <div id="toolbar">
   <div class="tool-btn" id="btn-grid"><span class="dot"></span>网格</div>
   <div class="tool-btn" id="btn-annotate"><span class="dot"></span>坐标标注</div>
   <div class="tool-btn" id="btn-face-info"><span class="dot"></span>面信息</div>
+  <div class="tool-btn" id="btn-measure"><span class="dot"></span>测量</div>
   <label class="layout-control" title="切换坐标标签的排列方式">
     标注布局
     <select id="annotation-layout-mode">
@@ -649,6 +708,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   const btnGrid = document.getElementById('btn-grid');
   const btnAnnotate = document.getElementById('btn-annotate');
   const btnFaceInfo = document.getElementById('btn-face-info');
+  const btnMeasure = document.getElementById('btn-measure');
   const btnClear = document.getElementById('btn-clear-annotate');
   const lockAnnotationInput = document.getElementById('lock-annotation-positions');
   const showOriginMarkerInput = document.getElementById('show-origin-marker');
@@ -663,6 +723,15 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   const faceInfoArea = document.getElementById('face-info-area');
   const faceInfoPosition = document.getElementById('face-info-position');
   const faceInfoNormal = document.getElementById('face-info-normal');
+  const measurePanel = document.getElementById('measure-panel');
+  const measureAxis = document.getElementById('measure-axis');
+  const measureStatus = document.getElementById('measure-status');
+  const measurePointA = document.getElementById('measure-point-a');
+  const measurePointB = document.getElementById('measure-point-b');
+  const measureDistance = document.getElementById('measure-distance');
+  const measureDelta = document.getElementById('measure-delta');
+  const measureProjection = document.getElementById('measure-projection');
+  const measurePerpendicular = document.getElementById('measure-perpendicular');
 
   grid.visible = false;
   originMarker.visible = false;
@@ -739,7 +808,13 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
 
   let annotateMode = false;
   let faceInfoMode = false;
+  let measureMode = false;
   let selectedFaceRoot = null;
+  const measurementRoot = new THREE.Group();
+  measurementRoot.renderOrder = 1000;
+  scene.add(measurementRoot);
+  let measurementPoints = [];
+  let measurementLine = null;
   const markerGroup = new THREE.Group();
   scene.add(markerGroup);
   const annotationLayer = document.getElementById('annotation-layer');
@@ -771,6 +846,113 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
     return corners;
   }
   const modelClearanceBoxCorners = boxCorners(modelClearanceWorldBox);
+
+  function formatPoint(point) {
+    return `X ${point.x.toFixed(2)}  Y ${point.y.toFixed(2)}  Z ${point.z.toFixed(2)}`;
+  }
+
+  function formatMeasureValue(value) {
+    return Number.isFinite(value) ? value.toFixed(2) : '-';
+  }
+
+  function removeMeasurementVisuals() {
+    measurementRoot.children.slice().forEach(child => {
+      measurementRoot.remove(child);
+      child.traverse(node => {
+        node.geometry?.dispose();
+        if (Array.isArray(node.material)) node.material.forEach(material => material.dispose());
+        else node.material?.dispose();
+      });
+    });
+    measurementLine = null;
+    measurementPoints = [];
+  }
+
+  function clearMeasurement() {
+    removeMeasurementVisuals();
+    measurePointA.textContent = '-';
+    measurePointB.textContent = '-';
+    measureDistance.textContent = '-';
+    measureDelta.textContent = '-';
+    measureProjection.textContent = '-';
+    measurePerpendicular.textContent = '-';
+    if (measureMode) {
+      measureStatus.textContent = '请点击模型上的第一个点';
+      measurePanel.style.display = 'block';
+    } else {
+      measurePanel.style.display = 'none';
+    }
+  }
+
+  function setMeasureMode(enabled) {
+    measureMode = enabled;
+    btnMeasure.classList.toggle('active', enabled);
+    if (enabled) {
+      annotateMode = false;
+      btnAnnotate.classList.remove('active');
+      coordTip.style.display = 'none';
+      setFaceInfoMode(false);
+      clearMeasurement();
+    } else {
+      clearMeasurement();
+    }
+  }
+
+  function addMeasurementPoint(worldPoint) {
+    const localPoint = group.worldToLocal(worldPoint.clone());
+    measurementPoints.push({ world: worldPoint.clone(), local: localPoint });
+
+    const pointSize = Math.max(modelSize.length() * 0.012, 1e-4);
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(pointSize, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xff5b22, depthTest: false })
+    );
+    marker.position.copy(worldPoint);
+    marker.renderOrder = 1001;
+    measurementRoot.add(marker);
+
+    if (measurementPoints.length === 1) {
+      measurePointA.textContent = formatPoint(localPoint);
+      measurePointB.textContent = '-';
+      measureStatus.textContent = '请点击模型上的第二个点';
+      return;
+    }
+
+    const second = measurementPoints[1];
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+      measurementPoints[0].world, second.world
+    ]);
+    measurementLine = new THREE.Line(
+      lineGeometry,
+      new THREE.LineBasicMaterial({ color: 0xff5b22, depthTest: false })
+    );
+    measurementLine.renderOrder = 1000;
+    measurementRoot.add(measurementLine);
+
+    const delta = second.local.clone().sub(measurementPoints[0].local);
+    const distance = delta.length();
+    const axis = measureAxis.value;
+    const projectionDistance = Math.abs(delta[axis]);
+    const perpendicular = Math.sqrt(Math.max(0, distance * distance - projectionDistance * projectionDistance));
+    measurePointA.textContent = formatPoint(measurementPoints[0].local);
+    measurePointB.textContent = formatPoint(second.local);
+    measureDistance.textContent = `${formatMeasureValue(distance)} 模型单位`;
+    measureDelta.textContent = `ΔX ${formatMeasureValue(delta.x)}  ΔY ${formatMeasureValue(delta.y)}  ΔZ ${formatMeasureValue(delta.z)}`;
+    measureProjection.textContent = `${axis.toUpperCase()} 轴投影距离: ${formatMeasureValue(projectionDistance)} 模型单位`;
+    measurePerpendicular.textContent = `${formatMeasureValue(perpendicular)} 模型单位`;
+    measureStatus.textContent = '已完成测量，点击第三个点可重新开始';
+  }
+
+  function refreshMeasurementProjection() {
+    if (measurementPoints.length !== 2) return;
+    const delta = measurementPoints[1].local.clone().sub(measurementPoints[0].local);
+    const axis = measureAxis.value;
+    const distance = delta.length();
+    const projectionDistance = Math.abs(delta[axis]);
+    const perpendicular = Math.sqrt(Math.max(0, distance * distance - projectionDistance * projectionDistance));
+    measureProjection.textContent = `${axis.toUpperCase()} 轴投影距离: ${formatMeasureValue(projectionDistance)} 模型单位`;
+    measurePerpendicular.textContent = `${formatMeasureValue(perpendicular)} 模型单位`;
+  }
 
   function clearSelectedFace() {
     if (selectedFaceRoot) {
@@ -1612,14 +1794,23 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
 
   btnAnnotate.addEventListener('click', () => {
     annotateMode = !annotateMode;
-    if (annotateMode) setFaceInfoMode(false);
+    if (annotateMode) {
+      setMeasureMode(false);
+      setFaceInfoMode(false);
+    }
     btnAnnotate.classList.toggle('active', annotateMode);
     coordTip.style.display = annotateMode ? 'block' : 'none';
   });
 
   btnFaceInfo.addEventListener('click', () => {
+    if (!faceInfoMode) setMeasureMode(false);
     setFaceInfoMode(!faceInfoMode);
   });
+
+  btnMeasure.addEventListener('click', () => {
+    setMeasureMode(!measureMode);
+  });
+  measureAxis.addEventListener('change', refreshMeasurementProjection);
 
   btnClear.addEventListener('click', clearAnnotations);
 
@@ -1633,7 +1824,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   });
 
   renderer.domElement.addEventListener('pointerup', e => {
-    if (!annotateMode && !faceInfoMode) return;
+    if (!annotateMode && !faceInfoMode && !measureMode) return;
     const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
     if (moved > 5) return; // 认为是拖拽旋转视角，不是点击拾取
 
@@ -1645,7 +1836,10 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
       hit.object.isMesh && Number.isInteger(hit.faceIndex) && hit.face
     );
     if (intersects.length > 0) {
-      if (faceInfoMode) showSelectedFace(intersects[0]);
+      if (measureMode) {
+        if (measurementPoints.length >= 2) clearMeasurement();
+        addMeasurementPoint(intersects[0].point);
+      } else if (faceInfoMode) showSelectedFace(intersects[0]);
       else addAnnotation(intersects[0].point);
     }
   });
