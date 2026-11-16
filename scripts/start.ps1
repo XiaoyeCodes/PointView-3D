@@ -69,18 +69,12 @@ function Initialize-Converter {
     if ($arch -ne 'x64') { return }
     $runtime = 'runtime/parasolid-win-x64'
     $converter = Join-Path $runtime 'PointViewXt.exe'
-    # A manually prepared, licensed runtime also works in a copy without Git metadata.
-    if ((Test-Path -LiteralPath '.git') -and ((Test-Path -LiteralPath "$runtime/.git") -or !(Test-Path -LiteralPath $converter))) {
-        Write-Host 'Checking the private X_T runtime. GitHub may ask you to sign in on first use.'
-        & git submodule update --init -- $runtime
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning 'Could not fetch the X_T runtime. Sign in to Git with access to PointView-3D-runtime and run start.bat again. The viewer can still start.'
-        } elseif (Test-Path -LiteralPath "$runtime/.git") {
-            $missing = @(& git -C $runtime ls-files --deleted)
-            if ($missing.Count -gt 0) {
-                & git -C $runtime restore --worktree -- $missing
-                if ($LASTEXITCODE -ne 0) { throw 'Could not restore missing converter files.' }
-            }
+    if ((Test-Path -LiteralPath '.git') -and (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+        $missing = @(& git ls-files --deleted -- $runtime)
+        if ($LASTEXITCODE -eq 0 -and $missing.Count -gt 0) {
+            Write-Host 'Restoring missing X_T runtime files from the local checkout...'
+            & git restore --worktree -- $missing
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restore missing converter files.' }
         }
     }
     if (!(Test-Path -LiteralPath $converter)) { return }

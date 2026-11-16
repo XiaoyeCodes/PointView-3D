@@ -35,9 +35,9 @@ cd PointView-3D
 .\start.bat
 ```
 
-首次启动需要联网。脚本会使用已有的兼容 Node.js 和 npm，缺少时会从 Node.js 官网下载、校验并解压到项目的 `.pointview` 目录，再按锁文件安装依赖。脚本还会通过 Git 拉取私有的 `XiaoyeCodes/PointView-3D-runtime` 子模块。Git 提示登录时，请使用有该仓库读取权限的 GitHub 账号。目标电脑无需安装 NX。若缺少转换器所需的 .NET Framework，脚本会启动 Microsoft 安装程序，Windows 可能要求管理员授权。
+X_T 转换器和运行库随主仓库一起下载，目标电脑可直接导入 `.x_t`，无需安装 NX 或登录 GitHub。首次启动需要联网。脚本会使用已有的兼容 Node.js 和 npm，缺少时会从 Node.js 官网下载、校验并解压到项目的 `.pointview` 目录，再按锁文件安装依赖。若缺少转换器所需的 .NET Framework，脚本会启动 Microsoft 安装程序，Windows 可能要求管理员授权。
 
-浏览器打开后即可使用。所需文件齐全后可离线启动。后续更新运行 `git pull` 后再次双击 `start.bat`，脚本会同步项目指定的运行库版本。停止服务时双击 `stop.bat`。
+浏览器打开后即可使用。所需文件齐全后可离线启动。后续运行 `git pull` 即可同时更新项目和运行库，再双击 `start.bat`。停止服务时双击 `stop.bat`。
 
 脚本也支持无暂停模式，方便在终端或其他工具中调用。
 
@@ -62,7 +62,7 @@ npm start
 
 在上传页选择或拖入一个 `.x_t` 文件，点击“生成并打开预览”。预览按原曲面分组，读取文件中的 RGB 面颜色，保留原模型坐标。显示和导入测点的长度单位均为毫米。
 
-在 Windows x64 上，`start.bat` 将独立转换器准备到 `runtime/parasolid-win-x64/`。上传的文件由本机的 `PointViewXt.exe` 调用 Parasolid 内核解析，无需设置 NX 环境变量。可读取的 X_T 版本取决于所用内核，本项目已验证 Parasolid 27.0.178。如果私有运行库拉取失败，脚本会显示提示，STEP、OBJ 等格式仍可使用。
+在 Windows x64 上，上传的文件由仓库内的 `runtime/parasolid-win-x64/PointViewXt.exe` 调用同目录下的 Parasolid 内核解析。可读取的 X_T 版本取决于所用内核，本项目已验证 Parasolid 27.0.178。
 
 **准备运行库**：本地构建脚本适用于 Windows x64、NX 10 的 UGII 目录结构及 Visual C++ 2012 x64 运行库。在有权使用这些组件的开发机上，从项目根目录执行：
 
@@ -71,7 +71,7 @@ npm start
 npm run test:xt
 ```
 
-构建脚本编译转换器，并将内核、托管接口、C 运行库和 schema 文件放入 `runtime/parasolid-win-x64/`。能访问私有子模块的用户可跳过此构建步骤。请按相应组件的许可在目标电脑使用运行库。
+构建脚本编译转换器，并将内核、托管接口、C 运行库和 schema 文件放入 `runtime/parasolid-win-x64/`。仅在重新构建转换器时才需要执行此步骤。请按相应组件的许可在目标电脑使用运行库。
 
 **已有 NX 的服务端**：缺少独立转换器时仍可使用 NX journal。服务从 `UGII_ROOT_DIR` 或 `UGII_BASE_DIR` 下的 `NXBIN` / `UGII` 查找 `run_journal`。两条路径都将原文件和预览网格保存在项目的 `uploads` 目录。
 

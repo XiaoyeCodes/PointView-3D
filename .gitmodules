@@ -1,3 +1,0 @@
-[submodule "runtime/parasolid-win-x64"]
-	path = runtime/parasolid-win-x64
-	url = https://github.com/XiaoyeCodes/PointView-3D-runtime.git
