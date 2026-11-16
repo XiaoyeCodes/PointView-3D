@@ -25,15 +25,19 @@ PointView 3D 是一个运行在浏览器中的三维模型查看与测点标注�
 
 ## 快速开始
 
-需要 Node.js 18 或更高版本。Windows 用户可以直接使用项目内的一键脚本。
-
 ### Windows
 
-双击 `start.bat`。脚本会在首次运行时自动安装依赖，启动本地服务并打开浏览器。
+在另一台 Windows 10/11 x64 电脑上，用 Git 克隆仓库，然后双击目录里的 `start.bat`。也可以在 PowerShell 中运行以下命令。
 
-停止服务时双击 `stop.bat`。
+```powershell
+git clone https://github.com/XiaoyeCodes/PointView-3D.git
+cd PointView-3D
+.\start.bat
+```
 
-如果新电脑提示找不到 Node.js 或 npm，双击 `repair.bat`。脚本会修复常见的 PATH 问题，缺少 Node.js 时通过 Windows Package Manager 安装官方 LTS 版本，然后安装项目依赖并启动服务。安装过程可能出现 Windows 管理员授权窗口。
+首次启动需要联网。脚本会使用已有的兼容 Node.js 和 npm，缺少时会从 Node.js 官网下载、校验并解压到项目的 `.pointview` 目录，再按锁文件安装依赖。脚本还会通过 Git 拉取私有的 `XiaoyeCodes/PointView-3D-runtime` 子模块。Git 提示登录时，请使用有该仓库读取权限的 GitHub 账号。目标电脑无需安装 NX。若缺少转换器所需的 .NET Framework，脚本会启动 Microsoft 安装程序，Windows 可能要求管理员授权。
+
+浏览器打开后即可使用。所需文件齐全后可离线启动。后续更新运行 `git pull` 后再次双击 `start.bat`，脚本会同步项目指定的运行库版本。停止服务时双击 `stop.bat`。
 
 脚本也支持无暂停模式，方便在终端或其他工具中调用。
 
@@ -44,6 +48,8 @@ repair.bat --no-pause
 ```
 
 ### macOS 与 Linux
+
+安装 Node.js 18 或更高版本后，在项目目录中运行：
 
 ```bash
 npm install
@@ -56,7 +62,7 @@ npm start
 
 在上传页选择或拖入一个 `.x_t` 文件，点击“生成并打开预览”。预览按原曲面分组，读取文件中的 RGB 面颜色，保留原模型坐标。显示和导入测点的长度单位均为毫米。
 
-**Windows x64 独立运行**：将完整项目（含 `runtime/parasolid-win-x64/`）放到目标电脑，再运行 `start.bat`。目标电脑需要 Node.js 18+（x64）及 .NET Framework 4.x；首次安装 npm 依赖需要网络，已有 `node_modules` 时可以离线使用。上传的文件由本机的 `PointViewXt.exe` 调用 Parasolid 内核解析，转换过程无需启动 NX 或设置 NX 环境变量。内核识别的 X_T 版本取决于打包的 Parasolid 版本，本项目已验证 27.0.178。
+在 Windows x64 上，`start.bat` 将独立转换器准备到 `runtime/parasolid-win-x64/`。上传的文件由本机的 `PointViewXt.exe` 调用 Parasolid 内核解析，无需设置 NX 环境变量。可读取的 X_T 版本取决于所用内核，本项目已验证 Parasolid 27.0.178。如果私有运行库拉取失败，脚本会显示提示，STEP、OBJ 等格式仍可使用。
 
 **准备运行库**：本地构建脚本适用于 Windows x64、NX 10 的 UGII 目录结构及 Visual C++ 2012 x64 运行库。在有权使用这些组件的开发机上，从项目根目录执行：
 
@@ -65,7 +71,7 @@ npm start
 npm run test:xt
 ```
 
-脚本编译项目的转换器，并将内核、托管接口、C 运行库和 schema 文件放入 `runtime/parasolid-win-x64/`。此目录在 Git 忽略列表中。从 Git 克隆源码时，需要用自己的运行库重新准备。复制给其他电脑或对外发布前，请核对相应组件许可覆盖目标机器和分发方式。
+构建脚本编译转换器，并将内核、托管接口、C 运行库和 schema 文件放入 `runtime/parasolid-win-x64/`。能访问私有子模块的用户可跳过此构建步骤。请按相应组件的许可在目标电脑使用运行库。
 
 **已有 NX 的服务端**：缺少独立转换器时仍可使用 NX journal。服务从 `UGII_ROOT_DIR` 或 `UGII_BASE_DIR` 下的 `NXBIN` / `UGII` 查找 `run_journal`。两条路径都将原文件和预览网格保存在项目的 `uploads` 目录。
 

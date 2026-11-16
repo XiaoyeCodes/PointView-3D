@@ -1,5 +1,5 @@
 node_modules/
-/runtime/parasolid-win-x64/
+/.pointview/
 uploads/*
 !uploads/.gitkeep
 .server.pid
