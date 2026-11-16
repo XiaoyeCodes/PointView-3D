@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { convertParasolid } = require('../converters/parasolid');
 
-test('NX preserves both 12 × 23 × 34 mm blocks, their placement and face ranges', async t => {
+test('X_T import preserves both 12 × 23 × 34 mm blocks, their placement and face ranges', async t => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pointview-test-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const preview = path.join(dir, 'preview.json');

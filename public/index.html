@@ -142,7 +142,7 @@
   </div>
 
   <div class="body">
-    <p class="hint">选择模型后即可打开 3D 预览。Parasolid（<code>.x_t</code>）由服务端的 Siemens NX 在本地转换。</p>
+    <p class="hint">选择模型后即可打开 3D 预览。Parasolid（<code>.x_t</code>）在服务端本地转换。</p>
 
     <form id="form">
       <div class="drop" id="drop">
@@ -237,7 +237,7 @@ form.addEventListener('submit', async e => {
   e.preventDefault();
   if (!objFile && !cadFile) return;
   goBtn.disabled = true;
-  status.textContent = cadFile && cadKind(cadFile) === 'xt' ? '正在上传并调用 NX 转换模型…' : '上传中…';
+  status.textContent = cadFile && cadKind(cadFile) === 'xt' ? '正在上传并转换 Parasolid 模型…' : '上传中…';
   status.className = 'status';
 
   const fd = new FormData();

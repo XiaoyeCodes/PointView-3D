@@ -5,6 +5,7 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 
 const run = promisify(execFile);
+const kernelExe = path.join(__dirname, '..', 'runtime', 'parasolid-win-x64', 'PointViewXt.exe');
 
 async function findJournalRunner() {
   const { UGII_ROOT_DIR, UGII_BASE_DIR } = process.env;
@@ -16,25 +17,29 @@ async function findJournalRunner() {
     const runner = path.join(dir, process.platform === 'win32' ? 'run_journal.exe' : 'run_journal');
     if (await fs.stat(runner).then(stat => stat.isFile(), () => false)) return runner;
   }
-  throw Object.assign(new Error('导入 X_T 需要 Siemens NX。请在服务端配置 UGII_BASE_DIR 并重启服务。'), { status: 503 });
+  throw Object.assign(new Error('未找到 X_T 转换器。请配置项目的 Parasolid 运行库，或安装 NX 并设置 UGII_BASE_DIR。'), { status: 503 });
 }
 
 async function convertParasolid(inputPath, outputPath) {
-  const runner = await findJournalRunner();
+  const portable = process.platform === 'win32' && process.arch === 'x64'
+    && await fs.stat(kernelExe).then(stat => stat.isFile(), () => false);
+  const runner = portable ? kernelExe : await findJournalRunner();
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'pointview-xt-'));
   try {
-    await fs.copyFile(inputPath, path.join(work, 'input.x_t'));
+    const mesh = path.join(work, 'mesh.json');
+    const args = portable ? [path.resolve(inputPath), mesh] : [path.join(__dirname, 'parasolid.py')];
+    if (!portable) await fs.copyFile(inputPath, path.join(work, 'input.x_t'));
     try {
-      await run(runner, [path.join(__dirname, 'parasolid.py')], {
+      await run(runner, args, {
         cwd: work, windowsHide: true, timeout: 5 * 60 * 1000,
       });
-      await fs.access(path.join(work, 'mesh.json'));
+      await fs.access(mesh);
     } catch (error) {
-      const detail = await fs.readFile(path.join(work, 'error.txt'), 'utf8').catch(() => '');
-      if (error.killed) throw new Error('NX 转换超时，请检查 NX 许可或尝试较小的模型。');
-      throw new Error('NX 无法生成预览，请检查文件版本、几何及 NX 许可。' + (detail ? ' ' + detail : ''));
+      if (error.killed) throw new Error('X_T 转换超时。');
+      const detail = portable ? error.stderr?.trim() : await fs.readFile(path.join(work, 'error.txt'), 'utf8').catch(() => '');
+      throw new Error('无法生成 X_T 预览，请检查文件版本和转换器运行环境。' + (detail ? ' ' + detail : ''));
     }
-    await fs.copyFile(path.join(work, 'mesh.json'), outputPath);
+    await fs.copyFile(mesh, outputPath);
   } finally {
     await fs.rm(work, { recursive: true, force: true, maxRetries: 3 });
   }

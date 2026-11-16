@@ -54,18 +54,20 @@ npm start
 
 ### 导入 Parasolid X_T
 
-在上传页选择或拖入一个 `.x_t` 文件，点击“生成并打开预览”。服务端调用 Siemens NX 读取实体和片体，按原曲面生成三角网格，保留模型坐标和 NX 面颜色。预览使用毫米，导入测点时也请使用毫米坐标。
+在上传页选择或拖入一个 `.x_t` 文件，点击“生成并打开预览”。预览按原曲面分组，读取文件中的 RGB 面颜色，保留原模型坐标。显示和导入测点的长度单位均为毫米。
 
-运行服务的电脑需要安装 Siemens NX，并具备运行 NX Open journal、导入 Parasolid 和曲面三角化所需的许可。服务从 `UGII_ROOT_DIR` 或 `UGII_BASE_DIR` 下的 `NXBIN` / `UGII` 查找 `run_journal`。Windows 已用 NX 10.0 验证。例如，可在 PowerShell 中启动：
+**Windows x64 独立运行**：将完整项目（含 `runtime/parasolid-win-x64/`）放到目标电脑，再运行 `start.bat`。目标电脑需要 Node.js 18+（x64）及 .NET Framework 4.x；首次安装 npm 依赖需要网络，已有 `node_modules` 时可以离线使用。上传的文件由本机的 `PointViewXt.exe` 调用 Parasolid 内核解析，转换过程无需启动 NX 或设置 NX 环境变量。内核识别的 X_T 版本取决于打包的 Parasolid 版本，本项目已验证 27.0.178。
+
+**准备运行库**：本地构建脚本适用于 Windows x64、NX 10 的 UGII 目录结构及 Visual C++ 2012 x64 运行库。在有权使用这些组件的开发机上，从项目根目录执行：
 
 ```powershell
-$env:UGII_BASE_DIR = 'D:/Program Files/Siemens/NX 10.0'
-npm start
+.\converters\kernel\prepare.ps1 -UgiiDirectory $env:UGII_ROOT_DIR
+npm run test:xt
 ```
 
-支持的 Parasolid 版本取决于本机 NX。原文件和预览网格保存在项目的 `uploads` 目录，转换在本机完成。
+脚本编译项目的转换器，并将内核、托管接口、C 运行库和 schema 文件放入 `runtime/parasolid-win-x64/`。此目录在 Git 忽略列表中。从 Git 克隆源码时，需要用自己的运行库重新准备。复制给其他电脑或对外发布前，请核对相应组件许可覆盖目标机器和分发方式。
 
-配置好 NX 后，可运行 `npm run test:xt`。测试会导入两个相距 50 mm（按原点计）的长方体，核对数量、曲面分组、尺寸和坐标。
+**已有 NX 的服务端**：缺少独立转换器时仍可使用 NX journal。服务从 `UGII_ROOT_DIR` 或 `UGII_BASE_DIR` 下的 `NXBIN` / `UGII` 查找 `run_journal`。两条路径都将原文件和预览网格保存在项目的 `uploads` 目录。
 
 ## 使用测试案例
 

@@ -1,4 +1,5 @@
 node_modules/
+/runtime/parasolid-win-x64/
 uploads/*
 !uploads/.gitkeep
 .server.pid
