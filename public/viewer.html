@@ -353,7 +353,7 @@
 <script src="/vendor/occt-import-js.js"></script>
 <script>
 /*
- * 两条渲染路径：
+ * 模型加载路径：
  *
  * 1. type=obj —— 用自己写的 OBJ/MTL 解析器（原因见下方注释），
  *    然后用 THREE.EdgesGeometry(geometry, 角度阈值) 生成"只描出真实
@@ -368,10 +368,12 @@
  *      a) 给每个曲面单独上色（如果 STEP 里带了颜色）
  *      b) 只画每个曲面自己的边界，不会把曲面内部的三角化线条画出来
  *    效果上就是标准 CAD 软件里看到的那种清晰边线。
+ * 3. type=xt 从本地 NX 转换结果读取带面分组的毫米网格。
  */
 
 const params = new URLSearchParams(window.location.search);
 const modelType = params.get('type') || 'obj';
+const lengthUnit = modelType === 'xt' ? 'mm' : '模型单位';
 const modelUrl = params.get('model');
 const mtlUrl = params.get('mtl');
 const modelName = params.get('name') || (modelUrl ? modelUrl.split('/').pop() : '');
@@ -380,12 +382,15 @@ const infoEl = document.getElementById('info');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
 
-infoEl.innerHTML = `<b>${modelName || '未命名模型'}</b><br>拖动旋转 · 滚轮缩放`;
+infoEl.innerHTML = '<b></b><br>拖动旋转 · 滚轮缩放';
+infoEl.querySelector('b').textContent = modelName || '未命名模型';
 
 if (!modelUrl) {
   showError('没有指定模型文件，请返回重新上传。');
 } else if (modelType === 'step') {
   mainStep();
+} else if (modelType === 'xt') {
+  mainParasolid();
 } else {
   mainObj();
 }
@@ -936,10 +941,10 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
     const perpendicular = Math.sqrt(Math.max(0, distance * distance - projectionDistance * projectionDistance));
     measurePointA.textContent = formatPoint(measurementPoints[0].local);
     measurePointB.textContent = formatPoint(second.local);
-    measureDistance.textContent = `${formatMeasureValue(distance)} 模型单位`;
+    measureDistance.textContent = `${formatMeasureValue(distance)} ${lengthUnit}`;
     measureDelta.textContent = `ΔX ${formatMeasureValue(delta.x)}  ΔY ${formatMeasureValue(delta.y)}  ΔZ ${formatMeasureValue(delta.z)}`;
-    measureProjection.textContent = `${axis.toUpperCase()} 轴投影距离: ${formatMeasureValue(projectionDistance)} 模型单位`;
-    measurePerpendicular.textContent = `${formatMeasureValue(perpendicular)} 模型单位`;
+    measureProjection.textContent = `${axis.toUpperCase()} 轴投影距离: ${formatMeasureValue(projectionDistance)} ${lengthUnit}`;
+    measurePerpendicular.textContent = `${formatMeasureValue(perpendicular)} ${lengthUnit}`;
     measureStatus.textContent = '已完成测量，点击第三个点可重新开始';
   }
 
@@ -950,8 +955,8 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
     const distance = delta.length();
     const projectionDistance = Math.abs(delta[axis]);
     const perpendicular = Math.sqrt(Math.max(0, distance * distance - projectionDistance * projectionDistance));
-    measureProjection.textContent = `${axis.toUpperCase()} 轴投影距离: ${formatMeasureValue(projectionDistance)} 模型单位`;
-    measurePerpendicular.textContent = `${formatMeasureValue(perpendicular)} 模型单位`;
+    measureProjection.textContent = `${axis.toUpperCase()} 轴投影距离: ${formatMeasureValue(projectionDistance)} ${lengthUnit}`;
+    measurePerpendicular.textContent = `${formatMeasureValue(perpendicular)} ${lengthUnit}`;
   }
 
   function clearSelectedFace() {
@@ -992,7 +997,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
         last: brepFace.last,
         number: brepFace.number,
         materialIndex: brepFace.materialIndex,
-        type: 'STEP B-rep 曲面'
+        type: modelType === 'xt' ? 'Parasolid B-rep 曲面' : 'STEP B-rep 曲面'
       };
     }
 
@@ -1131,7 +1136,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
     faceInfoType.textContent = surface.type;
     faceInfoMaterial.textContent = `#${surface.materialIndex + 1}`;
     faceInfoTriangles.textContent = String(surface.last - surface.first + 1);
-    faceInfoArea.textContent = `${formatMeasurement(getSurfaceArea(hit.object.geometry, surface))} 模型单位²`;
+    faceInfoArea.textContent = `${formatMeasurement(getSurfaceArea(hit.object.geometry, surface))} ${lengthUnit}²`;
     faceInfoPosition.textContent = `X ${localPoint.x.toFixed(3)}  Y ${localPoint.y.toFixed(3)}  Z ${localPoint.z.toFixed(3)}`;
     faceInfoNormal.textContent = `X ${localNormal.x.toFixed(3)}  Y ${localNormal.y.toFixed(3)}  Z ${localNormal.z.toFixed(3)}`;
     faceInfoPanel.style.display = 'block';
@@ -1815,6 +1820,8 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
   btnClear.addEventListener('click', clearAnnotations);
 
   const raycaster = new THREE.Raycaster();
+  // 模型网格都是 group 的直接子对象，坐标轴箭头和选中面高亮不参与拾取。
+  const pickableMeshes = group.children.filter(child => child.isMesh);
   const mouseNdc = new THREE.Vector2();
   let downX = 0, downY = 0;
 
@@ -1832,9 +1839,7 @@ function setupToolbar({ scene, camera, renderer, group, grid, originMarker }) {
     mouseNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouseNdc, camera);
-    const intersects = raycaster.intersectObject(group, true).filter(hit =>
-      hit.object.isMesh && Number.isInteger(hit.faceIndex) && hit.face
-    );
+    const intersects = raycaster.intersectObjects(pickableMeshes, false);
     if (intersects.length > 0) {
       if (measureMode) {
         if (measurementPoints.length >= 2) clearMeasurement();
@@ -2031,10 +2036,23 @@ async function mainStep() {
       return;
     }
 
-    renderStep(result);
+    renderCadMeshes(result);
   } catch (err) {
     console.error(err);
     showError('加载或解析 STEP 模型时出错：\n' + err.message);
+  }
+}
+
+async function mainParasolid() {
+  try {
+    setLoadingText('正在读取 Parasolid 曲面网格…');
+    const response = await fetch(modelUrl);
+    if (!response.ok) throw new Error('无法读取网格 (HTTP ' + response.status + ')');
+    const result = await response.json();
+    if (!result.meshes?.length) throw new Error('模型中没有可显示的曲面');
+    renderCadMeshes(result);
+  } catch (err) {
+    showError('加载 Parasolid 模型时出错：\n' + err.message);
   }
 }
 
@@ -2042,9 +2060,10 @@ async function mainStep() {
 // Three.js r128 的 Color 在这里按显示值使用，因此要转回 sRGB，才能还原
 // STEP 文件里的 COLOUR_RGB 数值。比如本测试模型的 Pale Tan 会从解析结果
 // (0.651, 0.509, 0.407) 恢复成文件中声明的 (0.827, 0.741, 0.671)。
-function stepColorToThree(color, fallback) {
+function cadColorToThree(color, fallback) {
   if (!color) return fallback ? fallback.clone() : new THREE.Color(0x9aa4b2);
-  return new THREE.Color(color[0], color[1], color[2]).convertLinearToSRGB();
+  const rgb = new THREE.Color(color[0], color[1], color[2]);
+  return modelType === 'xt' ? rgb : rgb.convertLinearToSRGB();
 }
 
 function stepColorKey(color) {
@@ -2066,7 +2085,7 @@ function buildStepMesh(geometryMesh) {
   const index = Uint32Array.from(geometryMesh.index.array);
   geometry.setIndex(new THREE.BufferAttribute(index, 1));
 
-  const defaultColor = stepColorToThree(geometryMesh.color);
+  const defaultColor = cadColorToThree(geometryMesh.color);
   const defaultMaterial = new THREE.MeshPhongMaterial({ color: defaultColor, shininess: 25, side: THREE.DoubleSide });
 
   const outlineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6 });
@@ -2085,7 +2104,7 @@ function buildStepMesh(geometryMesh) {
       }
       const key = stepColorKey(f.color);
       if (!materialIndexByColor.has(key)) {
-        const color = stepColorToThree(f.color, defaultColor);
+        const color = cadColorToThree(f.color, defaultColor);
         materials.push(new THREE.MeshPhongMaterial({ color, shininess: 25, side: THREE.DoubleSide }));
         materialIndexByColor.set(key, materials.length - 1);
       }
@@ -2229,11 +2248,13 @@ function dedupeOverlappingMeshes(meshes) {
   return { kept, skippedCount };
 }
 
-function renderStep(result) {
+function renderCadMeshes(result) {
   const { scene, camera, renderer } = createSceneBasics();
   const group = new THREE.Group();
 
-  const { kept, skippedCount } = dedupeOverlappingMeshes(result.meshes);
+  const { kept, skippedCount } = modelType === 'xt'
+    ? { kept: result.meshes, skippedCount: 0 }
+    : dedupeOverlappingMeshes(result.meshes);
   const colorStats = getStepColorStats(kept);
 
   kept.forEach(geometryMesh => {
@@ -2245,7 +2266,10 @@ function renderStep(result) {
   if (skippedCount > 0) {
     infoEl.innerHTML += `<br><span style="opacity:0.6">已自动跳过 ${skippedCount} 个与其他实体完全重叠的重复几何体（避免颜色错乱/闪烁）</span>`;
   }
-  if (colorStats.colorCount > 0) {
+  if (modelType === 'xt') {
+    const faceCount = kept.reduce((count, mesh) => count + mesh.brep_faces.length, 0);
+    infoEl.innerHTML += `<br>Parasolid · ${kept.length} 个几何体 · ${faceCount} 个曲面 · ${colorStats.colorCount} 种颜色 · 毫米`;
+  } else if (colorStats.colorCount > 0) {
     infoEl.innerHTML += `<br><span style="opacity:0.6">已读取 STEP 原始颜色：${colorStats.colorCount} 种可见颜色，${colorStats.coloredFaces} 个独立着色面</span>`;
   }
 

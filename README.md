@@ -1,6 +1,6 @@
 # PointView 3D
 
-PointView 3D 是一个运行在浏览器中的三维模型查看与测点标注工具。它可以加载 STEP、STP、OBJ 和 MTL 文件，也能把检测设备或测量软件导出的坐标数据直接标到模型上。
+PointView 3D 是一个运行在浏览器中的三维模型查看与测点标注工具。它可以加载 STEP、STP、Parasolid X_T、OBJ 和 MTL 文件，也能把检测设备或测量软件导出的坐标数据直接标到模型上。
 
 项目适合三坐标测量结果复核、工装测点检查、模型沟通和轻量 CAD 预览。服务只运行在本机，打开浏览器即可使用。
 
@@ -8,11 +8,11 @@ PointView 3D 是一个运行在浏览器中的三维模型查看与测点标注�
 
 ## 功能亮点
 
-- 支持 `.stp`、`.step`、`.obj` 和 `.mtl` 模型
+- 支持 `.stp`、`.step`、`.x_t`、`.obj` 和 `.mtl` 模型
 - 在浏览器中解析 STEP 几何，无需安装桌面 CAD 软件
 - 读取 STEP 的零件级与面级原始颜色，并修正导入器产生的颜色空间偏差
 - 点击模型表面即可创建坐标标注
-- 可选择 STEP 曲面或 OBJ 三角面，查看原始颜色、面积、坐标和法向信息
+- 可选择 STEP、Parasolid 曲面或 OBJ 三角面，查看原始颜色、面积、坐标和法向信息
 - 支持点到点测量，并可查看相对模型 X/Y/Z 参考轴的投影距离
 - 支持粘贴数据，也支持导入 CSV 和 TXT 测点文件
 - 提供“就近布局”和“均匀避让”两种标注排列方式
@@ -51,6 +51,21 @@ npm start
 ```
 
 服务启动后访问 [http://localhost:3000](http://localhost:3000)。
+
+### 导入 Parasolid X_T
+
+在上传页选择或拖入一个 `.x_t` 文件，点击“生成并打开预览”。服务端调用 Siemens NX 读取实体和片体，按原曲面生成三角网格，保留模型坐标和 NX 面颜色。预览使用毫米，导入测点时也请使用毫米坐标。
+
+运行服务的电脑需要安装 Siemens NX，并具备运行 NX Open journal、导入 Parasolid 和曲面三角化所需的许可。服务从 `UGII_ROOT_DIR` 或 `UGII_BASE_DIR` 下的 `NXBIN` / `UGII` 查找 `run_journal`。Windows 已用 NX 10.0 验证。例如，可在 PowerShell 中启动：
+
+```powershell
+$env:UGII_BASE_DIR = 'D:/Program Files/Siemens/NX 10.0'
+npm start
+```
+
+支持的 Parasolid 版本取决于本机 NX。原文件和预览网格保存在项目的 `uploads` 目录，转换在本机完成。
+
+配置好 NX 后，可运行 `npm run test:xt`。测试会导入两个相距 50 mm（按原点计）的长方体，核对数量、曲面分组、尺寸和坐标。
 
 ## 使用测试案例
 

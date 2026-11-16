@@ -99,7 +99,7 @@
   }
   .file-row.obj .tag { background: var(--accent); }
   .file-row.mtl .tag { background: #58a6ff; }
-  .file-row.step .tag { background: #3fb950; }
+  .file-row.step .tag, .file-row.xt .tag { background: #3fb950; }
   .file-row .name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-row .clear { color: var(--muted); cursor: pointer; padding: 0 4px; }
   .file-row .clear:hover { color: var(--err); }
@@ -142,16 +142,16 @@
   </div>
 
   <div class="body">
-    <p class="hint">上传一个 <code>.obj</code> 文件（可选附带同名 <code>.mtl</code> 材质文件），或者上传一个 <code>.stp</code> / <code>.step</code> 文件（精度更高的原生 CAD 格式，推荐优先使用）。提交后将自动跳转到对应的 3D 预览页面。</p>
+    <p class="hint">选择模型后即可打开 3D 预览。Parasolid（<code>.x_t</code>）由服务端的 Siemens NX 在本地转换。</p>
 
     <form id="form">
       <div class="drop" id="drop">
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <div class="main">点击选择文件，或将 .obj / .mtl / .stp / .step 拖到此处</div>
-        <div class="sub">OBJ 需要同时选中 .mtl；STEP 单独上传一个 .stp/.step 即可</div>
-        <input type="file" id="fileInput" accept=".obj,.mtl,.stp,.step" multiple>
+        <div class="main">点击选择文件，或将 .obj / .mtl / .stp / .step / .x_t 拖到此处</div>
+        <div class="sub">OBJ 可附带 MTL 材质文件，STEP 和 X_T 可单独上传</div>
+        <input type="file" id="fileInput" accept=".obj,.mtl,.stp,.step,.x_t" multiple>
       </div>
 
       <div class="filelist" id="fileList"></div>
@@ -164,7 +164,7 @@
   </div>
 
   <div class="footer">
-    <span>UPLOAD // .OBJ .MTL</span>
+    <span>UPLOAD // OBJ · STEP · X_T</span>
     <span id="clock"></span>
   </div>
 </div>
@@ -179,12 +179,16 @@ const form = document.getElementById('form');
 
 let objFile = null;
 let mtlFile = null;
-let stepFile = null;
+let cadFile = null;
+
+function cadKind(file) {
+  return /\.x_t$/i.test(file.name) ? 'xt' : 'step';
+}
 
 function renderFileList() {
   fileList.innerHTML = '';
-  if (stepFile) {
-    fileList.appendChild(makeRow('step', stepFile, () => { stepFile = null; renderFileList(); updateGoBtn(); }));
+  if (cadFile) {
+    fileList.appendChild(makeRow(cadKind(cadFile), cadFile, () => { cadFile = null; renderFileList(); updateGoBtn(); }));
   } else {
     if (objFile) fileList.appendChild(makeRow('obj', objFile, () => { objFile = null; renderFileList(); updateGoBtn(); }));
     if (mtlFile) fileList.appendChild(makeRow('mtl', mtlFile, () => { mtlFile = null; renderFileList(); updateGoBtn(); }));
@@ -194,28 +198,32 @@ function renderFileList() {
 function makeRow(kind, file, onClear) {
   const row = document.createElement('div');
   row.className = 'file-row ' + kind;
-  row.innerHTML = `<span class="tag">${kind.toUpperCase()}</span><span class="name">${file.name}</span><span class="clear">✕</span>`;
+  row.innerHTML = `<span class="tag">${(kind === 'xt' ? 'X_T' : kind.toUpperCase())}</span><span class="name"></span><span class="clear">✕</span>`;
+  row.querySelector('.name').textContent = file.name;
   row.querySelector('.clear').onclick = onClear;
   return row;
 }
 
 function updateGoBtn() {
-  goBtn.disabled = !objFile && !stepFile;
+  goBtn.disabled = !objFile && !cadFile;
 }
 
 function handleFiles(fileArr) {
   [...fileArr].forEach(f => {
     const ext = f.name.split('.').pop().toLowerCase();
-    if (ext === 'obj') { objFile = f; stepFile = null; }
-    else if (ext === 'mtl') { mtlFile = f; stepFile = null; }
-    else if (ext === 'stp' || ext === 'step') { stepFile = f; objFile = null; mtlFile = null; }
+    if (ext === 'obj') { objFile = f; cadFile = null; }
+    else if (ext === 'mtl') { mtlFile = f; cadFile = null; }
+    else if (['stp', 'step', 'x_t'].includes(ext)) { cadFile = f; objFile = null; mtlFile = null; }
   });
   renderFileList();
   updateGoBtn();
 }
 
 drop.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', e => handleFiles(e.target.files));
+fileInput.addEventListener('change', () => {
+  handleFiles(fileInput.files);
+  fileInput.value = '';
+});
 
 ['dragenter', 'dragover'].forEach(evt =>
   drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.add('drag'); })
@@ -227,14 +235,14 @@ drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
-  if (!objFile && !stepFile) return;
+  if (!objFile && !cadFile) return;
   goBtn.disabled = true;
-  status.textContent = '上传中…';
+  status.textContent = cadFile && cadKind(cadFile) === 'xt' ? '正在上传并调用 NX 转换模型…' : '上传中…';
   status.className = 'status';
 
   const fd = new FormData();
-  if (stepFile) {
-    fd.append('step', stepFile);
+  if (cadFile) {
+    fd.append(cadKind(cadFile), cadFile);
   } else {
     fd.append('obj', objFile);
     if (mtlFile) fd.append('mtl', mtlFile);
