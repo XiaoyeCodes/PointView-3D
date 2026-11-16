@@ -2,6 +2,8 @@ param([switch]$NoOpen)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# A .bat launched by PowerShell 7 can pass its incompatible modules to Windows PowerShell.
+$env:PSModulePath = "$PSHOME\Modules;$env:PSModulePath"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $project = (Get-Item -LiteralPath "$PSScriptRoot/..").FullName
 Set-Location -LiteralPath $project
@@ -9,6 +11,13 @@ $cache = Join-Path $project '.pointview'
 $nodeVersion = '22.23.5'
 $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
 $nodeFolder = "node-v$nodeVersion-win-$arch"
+
+function Test-Program($exe, [string[]]$arguments) {
+    # Windows PowerShell treats redirected stderr as an error, even for probes.
+    $ErrorActionPreference = 'Continue'
+    & $exe @arguments *> $null
+    return $LASTEXITCODE -eq 0
+}
 
 function Get-NodeDirectory {
     $localNode = Join-Path $cache "$nodeFolder/node.exe"
@@ -18,10 +27,8 @@ function Get-NodeDirectory {
         $dir = Split-Path -Parent $exe
         if (!(Test-Path -LiteralPath (Join-Path $dir 'npm.cmd'))) { continue }
         $expectedArch = if ($arch -eq 'x86') { 'ia32' } else { 'x64' }
-        & $exe -e "process.exit(process.arch === '$expectedArch' && parseInt(process.versions.node) >= 18 ? 0 : 1)"
-        if ($LASTEXITCODE -ne 0) { continue }
-        & (Join-Path $dir 'npm.cmd') --version *> $null
-        if ($LASTEXITCODE -eq 0) { return $dir }
+        if (!(Test-Program $exe @('-e', "process.exit(process.arch === '$expectedArch' && parseInt(process.versions.node) >= 18 ? 0 : 1)"))) { continue }
+        if (Test-Program (Join-Path $dir 'npm.cmd') @('--version')) { return $dir }
     }
 
     $archive = Join-Path $cache "$nodeFolder.zip"
@@ -49,11 +56,8 @@ function Install-Packages($nodeDir) {
     $stamp = Join-Path $cache 'package-lock.sha256'
     $hash = (Get-FileHash -LiteralPath 'package-lock.json' -Algorithm SHA256).Hash
     if ((Test-Path -LiteralPath $stamp) -and (Get-Content -LiteralPath $stamp -Raw).Trim() -eq $hash) {
-        & $npm ls --all --omit=dev --silent *> $null
-        if ($LASTEXITCODE -eq 0) {
-            & $node -e "require('express'); require('multer')" *> $null
-            if ($LASTEXITCODE -eq 0) { return }
-        }
+        if ((Test-Program $npm @('ls', '--all', '--omit=dev', '--silent')) -and
+            (Test-Program $node @('-e', "require('express'); require('multer')"))) { return }
     }
     Write-Host 'Installing the dependencies from package-lock.json...'
     & $npm ci --no-audit --no-fund
